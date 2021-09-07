@@ -4,9 +4,9 @@ Note: last_seen is INT it represents UNIX epoch time
 
 QUERY_CREATE_USERS_TABLE = """
         CREATE TABLE IF NOT EXISTS Users (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
             name text NOT NULL,
-            public_key text,
+            public_key text NOT NULL,
             last_seen INTEGER
         );
 """
@@ -28,4 +28,21 @@ QUERY_INSERT_MESSAGE = """
 
 QUERY_SELECT_FROM_MESSAGES = """
     SELECT * FROM Messages ORDER BY id DESC LIMIT 5;
+"""
+
+QUERY_FIND_USERNAME = """
+    SELECT * FROM Users WHERE name == '{username}';
+"""
+
+QUERY_INSERT_USER = """
+    INSERT INTO Users (name, public_key, last_seen)
+    VALUES ('{username}', '{public_key}', {last_seen});
+"""
+
+QUERY_TRUNCATE_TRABLE_Users = """
+    DROP TABLE Users;
+"""
+
+QUERY_TRUNCATE_TRABLE_Messages = """
+    DROP TABLE Messages;
 """
