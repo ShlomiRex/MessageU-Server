@@ -16,20 +16,22 @@ class BaseRequest:
     payloadSize: int
     payload: bytes
 
-
 @dataclass
 class RegisterUserRequest:
     name: str
     pub_key: bytes
     baseRequest: BaseRequest
 
+@dataclass
+class UsersListRequest:
+    baseRequest: BaseRequest
 
-def parseRequest(data: bytes) -> Union[RegisterUserRequest]:
+def parseRequest(data: bytes) -> Union[RegisterUserRequest, UsersListRequest]:
     # Unpack
     headerFmt = "<16scHI"
     s_header = struct.calcsize(headerFmt)
     clientId, version, code, payloadSize = struct.unpack(headerFmt, data[:s_header])
-    payload = data[s_header:]
+    payload = data[s_header : s_header + payloadSize]
 
     # Process
     clientId = int.from_bytes(clientId, "little", signed=False)
@@ -42,8 +44,13 @@ def parseRequest(data: bytes) -> Union[RegisterUserRequest]:
     if reqCode == RequestCodes.REQC_REGISTER_USER:
         term_i = payload.index(0x00)  # Find first null terminator
         name = payload[:term_i].decode()
-        pub_key = payload[term_i:term_i + 160]
+        pub_key = payload[term_i + 1 : term_i + 1 + 160]
+        if len(payload[term_i + 1 + 160:]) != 0:
+            logger.error(f"Name: {name}, Null terminator index: {term_i}, Public key size: {len(pub_key)}, Public key: {pub_key}")
+            raise BufferError("Something went wrong when parsing public key.")
         request = RegisterUserRequest(name=name, pub_key=pub_key, baseRequest=base_request)
+    elif reqCode == RequestCodes.REQC_CLIENT_LIST:
+        request = UsersListRequest(base_request)
     else:
         logger.error("Could not parse request code: " + str(code))
         raise ValueError("Request code: " + str(code) + " is invalid.")
