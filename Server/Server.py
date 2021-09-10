@@ -2,15 +2,15 @@ import select
 from socket import socket
 import logging
 
-from src.database.Database import Database
-from src.server.OpCodes import ResponseCodes
+from Database.Database import Database
+from Server.OpCodes import ResponseCodes
+from Server.ProtocolDefenitions import S_RECV_BUFF
 
-from src.server.Request import parseRequest, RegisterUserRequest, UsersListRequest
-from src.server.Response import BaseResponse
+from Server.Request import parseRequest, RegisterUserRequest, UsersListRequest
+from Server.Response import BaseResponse
 
-RECV_BUFF_S = 1024  # Amount of bytes to read at once from socket.
 SELECT_TIMEOUT = 1
-logger = logging.getLogger("Server")
+logger = logging.getLogger(__name__)
 
 
 class Server:
@@ -55,7 +55,7 @@ class Server:
                 else:
                     try:
                         self.__read_sock(sock)
-                    except ConnectionResetError or ConnectionAbortedError:
+                    except (ConnectionResetError, ConnectionAbortedError):
                         logger.info("A client has disconnected")
                         sock.close()
                         self.inputs.remove(sock)
@@ -68,8 +68,8 @@ class Server:
         self.server_sock.close()
 
     def __read_sock(self, sock: socket):
-        logger.info("Reading from socket")
-        data = sock.recv(RECV_BUFF_S)
+        logger.debug("Reading from socket")
+        data = sock.recv(S_RECV_BUFF)
         if len(data) == 0:
             logger.info("Socket has 0 bytes to read! Client has performed orderly shutdown!")
             raise ConnectionAbortedError("recv() returned 0 bytes read (shutdown of the connection)")
@@ -96,10 +96,8 @@ class Server:
                 # First check is name in database
                 registerSuccess, clientId = self.database.registerUser(request.name, request.pub_key)
                 if registerSuccess:
-                    payload = clientId.to_bytes(16, "little", signed=False)
-                    response = BaseResponse(self.version, ResponseCodes.RESC_REGISTER_SUCCESS, 16, payload)
-                    packet = response.pack()
-                    self.__send_packet(client_socket, packet)
+                    response = BaseResponse(self.version, ResponseCodes.RESC_REGISTER_SUCCESS, 16, clientId)
+                    self.__send_packet(client_socket, response)
                 else:
                     self.__send_error(client_socket)
             elif isinstance(request, UsersListRequest):
@@ -111,9 +109,11 @@ class Server:
             logger.exception(e)
             self.__send_error(client_socket)
 
-    def __send_packet(self, client_socket: socket, packet: bytes):
-        logger.info(f"Sending response ({len(packet)} bytes): {packet}")
-        client_socket.sendall(packet)
+    def __send_packet(self, client_socket: socket, response: BaseResponse):
+        payload = response.pack()
+        logger.info(f"Sending response ({len(payload)} bytes): {payload}")
+        logger.info(f"Response (parsed): {response}")
+        client_socket.sendall(payload)
         logger.info("Sent!")
 
     def shutdown(self):

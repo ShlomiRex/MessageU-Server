@@ -1,11 +1,9 @@
-import os
 import threading
 import time
 import unittest
 import socket
 
-from src import database
-from src.server.Server import Server
+from Server.Server import Server
 
 IP = "127.0.0.1"
 PORT = 8080

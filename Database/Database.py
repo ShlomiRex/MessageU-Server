@@ -1,8 +1,9 @@
 import sqlite3
 import logging
 import time
+import uuid
 
-from . import MODULE_LOGGER_NAME, DB_LOCATION
+from Database import MODULE_LOGGER_NAME, DB_LOCATION
 from .Queries import *
 
 logger = logging.getLogger(MODULE_LOGGER_NAME)
@@ -39,23 +40,25 @@ class Database:
         cur.execute(sql)
         self._conn.commit()
 
-    def registerUser(self, username: str, pub_key: bytes) -> tuple[bool, int]:
+    def registerUser(self, username: str, pub_key: bytes) -> tuple[bool, bytes]:
         logger.info("Registering user: " + str(username))
         row = self.getUser(username)
         if row is None:
             # No user exist. Add.
-            logger.debug("No such username in db. Adding...")
+            logger.debug("No such username in database. Adding...")
             unix_epoch = int(time.time())
             pub_key_hex = pub_key.hex()
-            sql = QUERY_INSERT_USER.format(username=username, public_key=pub_key_hex, last_seen=unix_epoch)
+            client_id = uuid.uuid4()
+            client_id_hex = client_id.hex
+            sql = QUERY_INSERT_USER.format(username=username, client_id=client_id_hex, public_key=pub_key_hex, last_seen=unix_epoch)
             cur = self._conn.cursor()
             cur.execute(sql)
             self._conn.commit()
             logger.debug("Added user to DB!")
-            return True, cur.lastrowid
+            return True, client_id.bytes
         else:
             logger.error("Can't register user: already in database.")
-            return False, -1
+            return False, b''
 
     def getUser(self, username: str):
         sql = QUERY_FIND_USERNAME.format(username=username)

@@ -5,6 +5,7 @@ Note: last_seen is INT it represents UNIX epoch time
 QUERY_CREATE_USERS_TABLE = """
         CREATE TABLE IF NOT EXISTS Users (
             id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
+            client_id text NOT NULL UNIQUE,
             name text NOT NULL,
             public_key text NOT NULL,
             last_seen INTEGER
@@ -35,8 +36,8 @@ QUERY_FIND_USERNAME = """
 """
 
 QUERY_INSERT_USER = """
-    INSERT INTO Users (name, public_key, last_seen)
-    VALUES ('{username}', '{public_key}', {last_seen});
+    INSERT INTO Users (name, client_id, public_key, last_seen)
+    VALUES ('{username}', '{client_id}', '{public_key}', {last_seen});
 """
 
 QUERY_TRUNCATE_TRABLE_Users = """

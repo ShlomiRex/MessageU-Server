@@ -1,0 +1,2 @@
+I don't get username, it can do sql injections probably
+I don't check length of inserted User or Message to DB

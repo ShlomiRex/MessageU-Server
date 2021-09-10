@@ -1,7 +1,7 @@
 from dataclasses import dataclass
 import struct
 
-from src.server.OpCodes import ResponseCodes
+from Server.OpCodes import ResponseCodes
 
 
 @dataclass
