@@ -4,7 +4,7 @@ import logging
 
 from Database.Database import Database
 from Server.OpCodes import ResponseCodes
-from Server.ProtocolDefenitions import S_RECV_BUFF
+from Server.ProtocolDefenitions import S_RECV_BUFF, S_USERNAME, S_CLIENT_ID
 
 from Server.Request import parseRequest, RegisterUserRequest, UsersListRequest
 from Server.Response import BaseResponse
@@ -93,16 +93,31 @@ class Server:
         logger.info("Request (unpacked): " + str(request))
         try:
             if isinstance(request, RegisterUserRequest):
+                logger.info("Handling register request...")
                 # First check is name in database
                 registerSuccess, clientId = self.database.registerUser(request.name, request.pub_key)
                 if registerSuccess:
-                    response = BaseResponse(self.version, ResponseCodes.RESC_REGISTER_SUCCESS, 16, clientId)
+                    response = BaseResponse(self.version, ResponseCodes.RESC_REGISTER_SUCCESS, S_CLIENT_ID, clientId)
                     self.__send_packet(client_socket, response)
                 else:
                     self.__send_error(client_socket)
             elif isinstance(request, UsersListRequest):
-                # TODO: Finish
-                pass
+                logger.info("Handling list users request...")
+                users = self.database.getAllUsers()
+                payload_size = (S_CLIENT_ID + S_USERNAME) * len(users)
+
+                # Send first packet which contains headers and payload size.
+                response = BaseResponse(self.version, ResponseCodes.RESC_LIST_USERS, payload_size, None)
+                first_packet = response.pack()
+                client_socket.send(first_packet)
+
+                # Send the rest of the payload in chunks
+                for client_id, username in users:
+                    client_id_payload = bytes.fromhex(client_id)
+                    username_null_padded_payload = username.ljust(S_USERNAME, '\0')
+                    payload = client_id_payload + username_null_padded_payload.encode()
+                    client_socket.send(payload)
+
             else:
                 raise TypeError("A request must be one of the request classes.")
         except Exception as e:

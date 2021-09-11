@@ -79,4 +79,9 @@ class Database:
         self._conn.commit()
         logger.warning("OK")
 
+    def getAllUsers(self) -> [tuple[str, str]]:
+        cur = self._conn.cursor()
+        cur.execute(QUERY_SELECT_ALL_USERS)
+        res = cur.fetchall()
+        return res
 

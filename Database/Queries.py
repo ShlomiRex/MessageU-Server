@@ -47,3 +47,7 @@ QUERY_TRUNCATE_TRABLE_Users = """
 QUERY_TRUNCATE_TRABLE_Messages = """
     DROP TABLE Messages;
 """
+
+QUERY_SELECT_ALL_USERS = """
+    SELECT client_id, name FROM Users;
+"""
