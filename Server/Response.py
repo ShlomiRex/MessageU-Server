@@ -1,5 +1,6 @@
 from dataclasses import dataclass
 import struct
+from typing import Optional, Union
 
 from Server.OpCodes import ResponseCodes
 
@@ -9,10 +10,10 @@ class BaseResponse:
     version: int
     code: ResponseCodes
     payloadSize: int
-    payload: bytes
+    payload: Union[bytes, None]
 
     def pack(self) -> bytes:
-        if self.payload and len(self.payload) > 0:
+        if self.payload is not None and len(self.payload) > 0:
             fmt = f"<cHI{self.payloadSize}s"
             return struct.pack(fmt, self.version.to_bytes(1, "little", signed=False), self.code.value, self.payloadSize, self.payload)
         else:

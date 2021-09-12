@@ -2,11 +2,11 @@ import select
 from socket import socket
 import logging
 
-from Database.Database import Database
-from Server.OpCodes import ResponseCodes
-from Server.ProtocolDefenitions import S_RECV_BUFF, S_USERNAME, S_CLIENT_ID
+from Database.Database import Database, UserNotExistDBException
+from Server.OpCodes import ResponseCodes, RequestCodes
+from Server.ProtocolDefenitions import S_USERNAME, S_CLIENT_ID, S_REQUEST_HEADER, S_PUBLIC_KEY
 
-from Server.Request import parseRequest, RegisterUserRequest, UsersListRequest, PublicKeyRequest
+from Server.Request import RequestHeader, unpack_request_header
 from Server.Response import BaseResponse
 
 SELECT_TIMEOUT = 1
@@ -54,7 +54,7 @@ class Server:
                     logger.info(f"New client connection from: {address}")
                 else:
                     try:
-                        self.__read_sock(sock)
+                        self.__handle_request(sock)
                     except (ConnectionResetError, ConnectionAbortedError):
                         logger.info("A client has disconnected")
                         sock.close()
@@ -67,18 +67,12 @@ class Server:
         logger.info("Server finished running")
         self.server_sock.close()
 
-    def __read_sock(self, sock: socket):
-        logger.debug("Reading from socket")
-        data = sock.recv(S_RECV_BUFF)
-        if len(data) == 0:
-            logger.info("Socket has 0 bytes to read! Client has performed orderly shutdown!")
-            raise ConnectionAbortedError("recv() returned 0 bytes read (shutdown of the connection)")
-        logger.debug(f"User sent data ({len(data)} bytes): {data}")
-        try:
-            self.__handle_request(sock, data)
-        except Exception as e:
-            logger.exception(e)
-            self.__send_error(sock)
+    def __recvRequestHeader(self, sock: socket) -> RequestHeader:
+        logger.debug("Receiving request header...")
+        buff = sock.recv(S_REQUEST_HEADER)
+        if len(buff) == 0:
+            raise ConnectionAbortedError("Couldn't receive request header!")
+        return unpack_request_header(buff)
 
     def __send_error(self, client_socket: socket):
         logger.warning("Sending error response...")
@@ -87,66 +81,78 @@ class Server:
         client_socket.sendall(packet)
         logger.warning("OK")
 
-    def __handle_request(self, client_socket: socket, data: bytes):
+    def __handle_request(self, client_socket: socket):
+        header = self.__recvRequestHeader(client_socket)
+        logger.debug(f"Header: {header}")
+
         logger.info("Handling request")
-        request = parseRequest(data)
-        logger.info("Request (unpacked): " + str(request))
 
-        # Check user exists
-        requestee_client_id_str_hex = request.baseRequest.clientId.hex()
-        is_requestee_client_id_valid = self.database.isClientIdExists(requestee_client_id_str_hex)
-        if not is_requestee_client_id_valid:
-            logger.critical(f"Request client id is not registered: {requestee_client_id_str_hex}")
-            self.__send_error(client_socket)
-            return
+        if header.code == RequestCodes.REQC_REGISTER_USER:
+            logger.info("Handling register request...")
 
-        try:
-            if isinstance(request, RegisterUserRequest):
-                logger.info("Handling register request...")
-                # First check is name in database
-                registerSuccess, clientId = self.database.registerUser(request.name, request.pub_key)
-                if registerSuccess:
-                    response = BaseResponse(self.version, ResponseCodes.RESC_REGISTER_SUCCESS, S_CLIENT_ID, clientId)
-                    self.__send_packet(client_socket, response)
-                else:
-                    self.__send_error(client_socket)
-            elif isinstance(request, UsersListRequest):
-                logger.info("Handling list users request...")
-                users = self.database.getAllUsers()
-                payload_size = (S_CLIENT_ID + S_USERNAME) * (len(users) - 1) # Minus 1 because registered user will not get his own data.
+            username = client_socket.recv(S_USERNAME).decode().rstrip('\x00')
+            pub_key = client_socket.recv(S_PUBLIC_KEY)
 
-                # Send first packet which contains headers and payload size.
-                response = BaseResponse(self.version, ResponseCodes.RESC_LIST_USERS, payload_size, None)
-                first_packet = response.pack()
-                client_socket.send(first_packet)
-
-                # Send the rest of the payload in chunks
-                for client_id, username in users:
-                    # Don't send the requestee his own data.
-                    client_id_hex_bytes = bytes.fromhex(client_id)
-                    # Compare bytes to bytes.
-                    if client_id_hex_bytes == request.baseRequest.clientId:
-                        continue
-                    client_id_payload = bytes.fromhex(client_id)
-                    username_null_padded_payload = username.ljust(S_USERNAME, '\0')
-                    payload = client_id_payload + username_null_padded_payload.encode()
-                    client_socket.send(payload)
-
-            elif isinstance(request, PublicKeyRequest):
-                logger.info("Handling public key request...")
-
+            # First check is name in database
+            register_success, client_id = self.database.registerUser(username, pub_key)
+            if register_success:
+                response = BaseResponse(self.version, ResponseCodes.RESC_REGISTER_SUCCESS, S_CLIENT_ID, client_id)
+                self.__send_packet(client_socket, response)
             else:
-                raise TypeError("A request must be one of the request classes.")
-        except Exception as e:
-            logger.exception(e)
-            self.__send_error(client_socket)
+                self.__send_error(client_socket)
+
+            logger.info("Finished handling register request.")
+
+        elif header.code == RequestCodes.REQC_CLIENT_LIST:
+            logger.info("Handling client list request...")
+
+            # Get users to send
+            users = self.database.getAllUsers()
+            payload_size = (S_CLIENT_ID + S_USERNAME) * (len(users) - 1) # Minus 1 because registered user will not get his own data.
+
+            # Send first packet which contains headers and payload size.
+            response = BaseResponse(self.version, ResponseCodes.RESC_LIST_USERS, payload_size, None)
+            client_socket.send(response.pack())
+
+            # Send the rest of the payload in chunks
+            for client_id, username in users:
+                # Convert DB string of hex to bytes.
+                client_id_hex_bytes = bytes.fromhex(client_id)
+
+                # Don't send the requestee his own data. Compare bytes to bytes.
+                if client_id_hex_bytes == header.clientId:
+                    continue
+
+                # Send the user data.
+                client_id_payload = bytes.fromhex(client_id)
+                username_null_padded_payload = username.ljust(S_USERNAME, '\0')
+                payload = client_id_payload + username_null_padded_payload.encode()
+                client_socket.send(payload)
+
+            logger.info("Finished handling users list request.")
+
+        elif header.code == RequestCodes.REQC_PUB_KEY:
+            logger.info("Handling public key request...")
+            client_id = client_socket.recv(S_CLIENT_ID)
+            try:
+                pub_key = self.database.getUserByClientId(client_id.hex())[3]
+                pub_key_bytes = bytes.fromhex(pub_key)
+                payload = client_id + pub_key_bytes
+                response = BaseResponse(self.version, ResponseCodes.RESC_PUBLIC_KEY, S_CLIENT_ID + S_PUBLIC_KEY, payload)
+                self.__send_packet(client_socket, response)
+            except UserNotExistDBException:
+                self.__send_error(client_socket)
+
+        else:
+            logger.error("Could not parse request code: " + str(header.code))
+            raise ValueError("Request code: " + str(header.code) + " is invalid, or not implemented yet.")
 
     def __send_packet(self, client_socket: socket, response: BaseResponse):
         payload = response.pack()
-        logger.info(f"Sending response ({len(payload)} bytes): {payload}")
-        logger.info(f"Response (parsed): {response}")
+        logger.debug(f"Sending response ({len(payload)} bytes): {payload}")
+        logger.debug(f"Response (parsed): {response}")
         client_socket.sendall(payload)
-        logger.info("Sent!")
+        logger.debug("Sent!")
 
     def shutdown(self):
         self._is_running = False

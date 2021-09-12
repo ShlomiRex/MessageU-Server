@@ -12,7 +12,7 @@ logger = logging.getLogger(MODULE_LOGGER_NAME)
 class Database:
     def __init__(self):
         logger.debug("Connecting...")
-        self._conn = sqlite3.connect(DB_LOCATION, check_same_thread=False) # Multiple threads can use same cursor
+        self._conn = sqlite3.connect(DB_LOCATION, check_same_thread=False)  # Multiple threads can use same cursor
         logger.debug("Connected!")
 
         self.create_db()
@@ -35,7 +35,8 @@ class Database:
         logger.debug("OK")
 
     def __insert_message(self, to_client: int, from_client: int, type: int, content: str):
-        sql = QUERY_INSERT_MESSAGE.format(id=id, to_client=to_client, from_client=from_client, type=type, content=content)
+        sql = QUERY_INSERT_MESSAGE.format(id=id, to_client=to_client, from_client=from_client, type=type,
+                                          content=content)
         cur = self._conn.cursor()
         cur.execute(sql)
         self._conn.commit()
@@ -50,7 +51,8 @@ class Database:
             pub_key_hex = pub_key.hex()
             client_id = uuid.uuid4()
             client_id_hex = client_id.hex
-            sql = QUERY_INSERT_USER.format(username=username, client_id=client_id_hex, public_key=pub_key_hex, last_seen=unix_epoch)
+            sql = QUERY_INSERT_USER.format(username=username, client_id=client_id_hex, public_key=pub_key_hex,
+                                           last_seen=unix_epoch)
             cur = self._conn.cursor()
             cur.execute(sql)
             self._conn.commit()
@@ -66,7 +68,6 @@ class Database:
         cur.execute(sql)
         row = cur.fetchone()
         return row
-
 
     def truncateDB(self):
         # For testing purposes only.
@@ -94,3 +95,23 @@ class Database:
             return False
         else:
             return True
+
+    def getUserByClientId(self, client_id: str) -> tuple[int, str, str, str, int]:
+        """
+        Query DB and return single user from Users table.
+        :param client_id:
+        :return: Id (int), ClientId (hex str), Username (str), Public Key (hex str), Last seen (unix epoch int)
+        """
+        sql = QUERY_SELECT_USER_BY_CLIENT_ID.format(client_id=client_id)
+        cur = self._conn.cursor()
+        cur.execute(sql)
+        res = cur.fetchone()
+
+        if res is None or len(res) == 0:
+            raise UserNotExistDBException()
+        else:
+            return res
+
+
+class UserNotExistDBException(Exception):
+    pass

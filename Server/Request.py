@@ -1,62 +1,28 @@
 import logging
 from dataclasses import dataclass
 import struct
-from typing import Union
 
 from Server.OpCodes import RequestCodes
-from Server.ProtocolDefenitions import S_USERNAME, S_CLIENT_ID, S_PUBLIC_KEY
+from Server.ProtocolDefenitions import S_CLIENT_ID
 
 logger = logging.getLogger(__name__)
 
-
 @dataclass
-class BaseRequest:
-    clientId: bytes
-    version: int
-    code: RequestCodes
-    payloadSize: int
-    payload: bytes
+class RequestHeader:
+    clientId: bytes  # 16 bytes
+    version: int  # 1 byte
+    code: RequestCodes  # 2 bytes
+    payloadSize: int  # 4 bytes
 
-@dataclass
-class RegisterUserRequest:
-    name: str
-    pub_key: bytes
-    baseRequest: BaseRequest
 
-@dataclass
-class UsersListRequest:
-    baseRequest: BaseRequest
-
-@dataclass
-class PublicKeyRequest:
-    clientId: bytes
-    baseRequest: BaseRequest
-
-def parseRequest(data: bytes) -> Union[RegisterUserRequest, UsersListRequest]:
+def unpack_request_header(data: bytes) -> RequestHeader:
     # Unpack
-    headerFmt = f"<{S_CLIENT_ID}scHI"
-    s_header = struct.calcsize(headerFmt)
-    clientId, version, code, payloadSize = struct.unpack(headerFmt, data[:s_header])
-    payload = data[s_header : s_header + payloadSize]
+    header_fmt = f"<{S_CLIENT_ID}scHI"
+    s_header = struct.calcsize(header_fmt)
+    client_id, version, code, payload_size = struct.unpack(header_fmt, data[:s_header])
 
     # Process
-    #clientId = int.from_bytes(clientId, "little", signed=False)
-    version = int.from_bytes(version, "little", signed=False)
-    reqCode = RequestCodes(code)
+    _version = int.from_bytes(version, "little", signed=False)
+    _code = RequestCodes(code)
 
-    # Return processed request
-    base_request = BaseRequest(clientId=clientId, version=version, code=code, payloadSize=payloadSize, payload=payload)
-
-    if reqCode == RequestCodes.REQC_REGISTER_USER:
-        name = payload[: S_USERNAME].decode().rstrip('\x00')
-        pub_key = payload[S_USERNAME : S_USERNAME + S_PUBLIC_KEY]
-        request = RegisterUserRequest(name=name, pub_key=pub_key, baseRequest=base_request)
-    elif reqCode == RequestCodes.REQC_CLIENT_LIST:
-        request = UsersListRequest(base_request)
-    elif reqCode == RequestCodes.REQC_PUB_KEY:
-        request = PublicKeyRequest(clientId, base_request)
-    else:
-        logger.error("Could not parse request code: " + str(code))
-        raise ValueError("Request code: " + str(code) + " is invalid, or not implimented yet.")
-
-    return request
+    return RequestHeader(client_id, _version, _code, payload_size)
