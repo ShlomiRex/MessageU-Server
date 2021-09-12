@@ -85,3 +85,12 @@ class Database:
         res = cur.fetchall()
         return res
 
+    def isClientIdExists(self, client_id: str) -> bool:
+        sql = QUERY_SELECT_USER_BY_CLIENT_ID.format(client_id=client_id)
+        cur = self._conn.cursor()
+        cur.execute(sql)
+        res = cur.fetchone()
+        if res is None or len(res) == 0:
+            return False
+        else:
+            return True

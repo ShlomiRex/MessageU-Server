@@ -51,3 +51,7 @@ QUERY_TRUNCATE_TRABLE_Messages = """
 QUERY_SELECT_ALL_USERS = """
     SELECT client_id, name FROM Users;
 """
+
+QUERY_SELECT_USER_BY_CLIENT_ID = """
+    SELECT * FROM Users WHERE client_id='{client_id}';
+"""

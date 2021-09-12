@@ -6,7 +6,7 @@ from Database.Database import Database
 from Server.OpCodes import ResponseCodes
 from Server.ProtocolDefenitions import S_RECV_BUFF, S_USERNAME, S_CLIENT_ID
 
-from Server.Request import parseRequest, RegisterUserRequest, UsersListRequest
+from Server.Request import parseRequest, RegisterUserRequest, UsersListRequest, PublicKeyRequest
 from Server.Response import BaseResponse
 
 SELECT_TIMEOUT = 1
@@ -91,6 +91,15 @@ class Server:
         logger.info("Handling request")
         request = parseRequest(data)
         logger.info("Request (unpacked): " + str(request))
+
+        # Check user exists
+        requestee_client_id_str_hex = request.baseRequest.clientId.hex()
+        is_requestee_client_id_valid = self.database.isClientIdExists(requestee_client_id_str_hex)
+        if not is_requestee_client_id_valid:
+            logger.critical(f"Request client id is not registered: {requestee_client_id_str_hex}")
+            self.__send_error(client_socket)
+            return
+
         try:
             if isinstance(request, RegisterUserRequest):
                 logger.info("Handling register request...")
@@ -104,7 +113,7 @@ class Server:
             elif isinstance(request, UsersListRequest):
                 logger.info("Handling list users request...")
                 users = self.database.getAllUsers()
-                payload_size = (S_CLIENT_ID + S_USERNAME) * len(users)
+                payload_size = (S_CLIENT_ID + S_USERNAME) * (len(users) - 1) # Minus 1 because registered user will not get his own data.
 
                 # Send first packet which contains headers and payload size.
                 response = BaseResponse(self.version, ResponseCodes.RESC_LIST_USERS, payload_size, None)
@@ -113,10 +122,18 @@ class Server:
 
                 # Send the rest of the payload in chunks
                 for client_id, username in users:
+                    # Don't send the requestee his own data.
+                    client_id_hex_bytes = bytes.fromhex(client_id)
+                    # Compare bytes to bytes.
+                    if client_id_hex_bytes == request.baseRequest.clientId:
+                        continue
                     client_id_payload = bytes.fromhex(client_id)
                     username_null_padded_payload = username.ljust(S_USERNAME, '\0')
                     payload = client_id_payload + username_null_padded_payload.encode()
                     client_socket.send(payload)
+
+            elif isinstance(request, PublicKeyRequest):
+                logger.info("Handling public key request...")
 
             else:
                 raise TypeError("A request must be one of the request classes.")
