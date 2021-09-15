@@ -15,16 +15,22 @@ QUERY_CREATE_USERS_TABLE = """
 QUERY_CREATE_MESSAGES_TABLE = """
         CREATE TABLE IF NOT EXISTS Messages (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
-            to_client INTEGER NOT NULL,
-            from_client INTEGER NOT NULL,
+            to_client TEXT NOT NULL,
+            from_client TEXT NOT NULL,
             type INTEGER NOT NULL,
-            content blob NOT NULL
+            content_size INTEGER NOT NULL,
+            content blob
         );
 """
 
 QUERY_INSERT_MESSAGE = """
-    INSERT INTO Messages (to_client, from_client, type, content) 
-    VALUES ({to_client}, {from_client}, {type}, '{content}');
+    INSERT INTO Messages (to_client, from_client, type, content_size, content) 
+    VALUES ('{to_client}', '{from_client}', {type}, {content_size}, '{content}');
+"""
+
+QUERY_INSERT_MESSAGE_WITHOUT_CONTENT = """
+    INSERT INTO Messages (to_client, from_client, type, content_size) 
+    VALUES ('{to_client}', '{from_client}', {type}, 0);
 """
 
 QUERY_SELECT_FROM_MESSAGES = """

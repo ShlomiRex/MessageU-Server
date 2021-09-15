@@ -2,6 +2,7 @@ import sqlite3
 import logging
 import time
 import uuid
+from typing import Optional
 
 from Database import MODULE_LOGGER_NAME, DB_LOCATION
 from .Queries import *
@@ -33,13 +34,6 @@ class Database:
         cur.execute(QUERY_CREATE_MESSAGES_TABLE)
         self._conn.commit()
         logger.debug("OK")
-
-    def __insert_message(self, to_client: int, from_client: int, type: int, content: str):
-        sql = QUERY_INSERT_MESSAGE.format(id=id, to_client=to_client, from_client=from_client, type=type,
-                                          content=content)
-        cur = self._conn.cursor()
-        cur.execute(sql)
-        self._conn.commit()
 
     def registerUser(self, username: str, pub_key: bytes) -> tuple[bool, bytes]:
         logger.info("Registering user: " + str(username))
@@ -111,6 +105,25 @@ class Database:
             raise UserNotExistDBException()
         else:
             return res
+
+    def insertMessage(self, to_client: str, from_client: str, message_type: int, content_size: int, content: Optional[bytes]) -> bool:
+        logger.debug(f"Inserting message from: {from_client} to: {to_client}")
+        if content_size > 0:
+            sql = QUERY_INSERT_MESSAGE.format(to_client=to_client, from_client=from_client,
+                                              type=message_type, content_size=content_size, content=content)
+        else:
+            sql = QUERY_INSERT_MESSAGE_WITHOUT_CONTENT.format(to_client=to_client, from_client=from_client, type=message_type)
+        cur = self._conn.cursor()
+        cur.execute(sql)
+        self._conn.commit()
+        res = cur.fetchone()
+
+        if cur.rowcount != 1:
+            logger.error("Failed to insert a row!")
+            return False
+        else:
+            return True
+
 
 
 class UserNotExistDBException(Exception):

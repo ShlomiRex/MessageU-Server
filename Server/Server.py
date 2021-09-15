@@ -3,8 +3,9 @@ from socket import socket
 import logging
 
 from Database.Database import Database, UserNotExistDBException
-from Server.OpCodes import ResponseCodes, RequestCodes
-from Server.ProtocolDefenitions import S_USERNAME, S_CLIENT_ID, S_REQUEST_HEADER, S_PUBLIC_KEY
+from Server.OpCodes import ResponseCodes, RequestCodes, MessageTypes
+from Server.ProtocolDefenitions import S_USERNAME, S_CLIENT_ID, S_REQUEST_HEADER, S_PUBLIC_KEY, S_MESSAGE_TYPE, \
+    S_CONTENT_SIZE
 
 from Server.Request import RequestHeader, unpack_request_header
 from Server.Response import BaseResponse
@@ -47,6 +48,13 @@ class Server:
         logger.info(f"Server is listening on: {self.ip}:{self.port}")
         while self._is_running and self.inputs:
             readable, writeable, exceptions = select.select(self.inputs, [], [], SELECT_TIMEOUT)
+            if len(readable) > 0:
+                logger.debug(f"Readables: {readable}")
+            if len(writeable) > 0:
+                logger.debug(f"Writeables: {writeable}")
+            if len(exceptions) > 0:
+                logger.debug(f"Exceptions: {exceptions}")
+
             for sock in readable:
                 if sock is self.server_sock:
                     client, address = self.server_sock.accept()
@@ -67,7 +75,7 @@ class Server:
         logger.info("Server finished running")
         self.server_sock.close()
 
-    def __recvRequestHeader(self, sock: socket) -> RequestHeader:
+    def __receive_request_header(self, sock: socket) -> RequestHeader:
         logger.debug("Receiving request header...")
         buff = sock.recv(S_REQUEST_HEADER)
         if len(buff) == 0:
@@ -82,7 +90,7 @@ class Server:
         logger.warning("OK")
 
     def __handle_request(self, client_socket: socket):
-        header = self.__recvRequestHeader(client_socket)
+        header = self.__receive_request_header(client_socket)
         logger.debug(f"Header: {header}")
 
         logger.info("Handling request")
@@ -108,7 +116,8 @@ class Server:
 
             # Get users to send
             users = self.database.getAllUsers()
-            payload_size = (S_CLIENT_ID + S_USERNAME) * (len(users) - 1) # Minus 1 because registered user will not get his own data.
+            # Minus 1 because registered user will not get his own data.
+            payload_size = (S_CLIENT_ID + S_USERNAME) * (len(users) - 1)
 
             # Send first packet which contains headers and payload size.
             response = BaseResponse(self.version, ResponseCodes.RESC_LIST_USERS, payload_size, None)
@@ -143,9 +152,53 @@ class Server:
             except UserNotExistDBException:
                 self.__send_error(client_socket)
 
+        elif header.code == RequestCodes.REQC_SEND_MESSAGE:
+            logger.info("Handling send message request...")
+
+            # Get message header
+            dst_client_id = client_socket.recv(S_CLIENT_ID)
+            message_type = client_socket.recv(S_MESSAGE_TYPE)
+            content_size = client_socket.recv(S_CONTENT_SIZE)
+
+            # Process
+            message_type_int = int.from_bytes(message_type, "little", signed=False)
+            message_type_enum = MessageTypes(message_type_int)
+            content_size_int = int.from_bytes(content_size, "little", signed=False)
+            to_client = dst_client_id
+            from_client = header.clientId
+
+            # Check type
+            if message_type_enum == MessageTypes.REQ_SYMMETRIC_KEY:
+                # No message content then
+
+                if content_size_int != 0:
+                    logger.error(f"Expected content of size 0 in symmetric key request, instead got content size: {content_size_int}")
+                    self.__send_error(client_socket)
+                    return
+
+                logger.info(f"Request for symmetric key from: {from_client.hex(' ', 2)} to: {to_client.hex(' ', 2)}")
+
+                # Check recipient exists
+                if not self.database.isClientIdExists(dst_client_id.hex()):
+                    logger.error("Destination recipient doesn't exist!")
+                    self.__send_error(client_socket)
+                    return
+                else:
+                    logger.debug("Destination client id exists!")
+                    logger.info("Inserting message to database...")
+                    success = self.database.insertMessage(to_client.hex(), from_client.hex(),
+                                                          message_type_int, content_size_int, None)
+                    if not success:
+                        self.__send_error(client_socket)
+                    else:
+                        logger.info("Success!")
+                pass
+            else:
+                raise ValueError(f"Message type: {message_type} is not recognized.")
+
         else:
-            logger.error("Could not parse request code: " + str(header.code))
-            raise ValueError("Request code: " + str(header.code) + " is invalid, or not implemented yet.")
+            raise ValueError("Request code: " + str(header.code) + " is not recognized.")
+
 
     def __send_packet(self, client_socket: socket, response: BaseResponse):
         payload = response.pack()
