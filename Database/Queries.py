@@ -61,3 +61,7 @@ QUERY_SELECT_ALL_USERS = """
 QUERY_SELECT_USER_BY_CLIENT_ID = """
     SELECT * FROM Users WHERE client_id='{client_id}';
 """
+
+QUERY_MESSAGES_TO_CLIENT = """
+    SELECT * FROM Messages WHERE to_client='{client_id}';
+"""

@@ -8,7 +8,7 @@ from Server.ProtocolDefenitions import S_USERNAME, S_CLIENT_ID, S_REQUEST_HEADER
     S_CONTENT_SIZE, S_MESSAGE_ID
 
 from Server.Request import RequestHeader, unpack_request_header
-from Server.Response import BaseResponse, MessageResponse
+from Server.Response import BaseResponse, MessageResponse, ResponsePayload_PullMessage
 
 SELECT_TIMEOUT = 1
 logger = logging.getLogger(__name__)
@@ -73,6 +73,9 @@ class Server:
         logger.info("Server finished running")
         self.server_sock.close()
 
+    def shutdown(self):
+        self._is_running = False
+
     def __receive_request_header(self, sock: socket) -> RequestHeader:
         logger.debug("Receiving request header...")
         buff = sock.recv(S_REQUEST_HEADER)
@@ -82,7 +85,7 @@ class Server:
 
     def __send_error(self, client_socket: socket):
         logger.info("Sending error response...")
-        response = BaseResponse(self.version, ResponseCodes.RESC_ERROR, 0, b'')
+        response = BaseResponse(self.version, ResponseCodes.RESC_ERROR, 0, None)
         packet = response.pack()
         client_socket.sendall(packet)
 
@@ -103,6 +106,9 @@ class Server:
 
         elif header.code == RequestCodes.REQC_SEND_MESSAGE:
             self.__handle_send_message_request(client_socket, header)
+
+        elif header.code == RequestCodes.REQC_WAITING_MSGS:
+            self.__handle_pull_waiting_messages(client_socket, header)
 
         else:
             raise ValueError("Request code: " + str(header.code) + " is not recognized.")
@@ -158,9 +164,6 @@ class Server:
         logger.debug(f"Sending response (parsed): {response}")
         client_socket.sendall(packet)
         logger.debug("Sent!")
-
-    def shutdown(self):
-        self._is_running = False
 
     def __handle_pub_key_request(self, client_socket: socket):
         logger.info("Handling public key request...")
@@ -220,4 +223,32 @@ class Server:
             pass
         else:
             raise ValueError(f"Message type: {message_type} is not recognized.")
+
+    def __handle_pull_waiting_messages(self, client_socket: socket, header: RequestHeader):
+        # No payload. No need to read from socket.
+
+        # The one who send this request, we take all of the messages that have 'to_client' equal to him.
+        requestee = header.clientId.hex()
+        db_messages = self.database.get_messages(requestee)
+
+        payload = b''
+
+        if db_messages is not None and len(db_messages) != 0:
+            messages = []
+            for db_message in db_messages:
+                # Unpack
+                id, to_client, from_client, type, content_size, content = db_message
+
+                # Process
+                type_enum = MessageTypes(type)
+                from_client_bytes = bytes.fromhex(from_client)
+
+                # Create payload
+                _payload = ResponsePayload_PullMessage(from_client_bytes, id, type_enum, content_size, content)
+                packet = _payload.pack()
+                payload += packet
+
+        response = BaseResponse(self.version, ResponseCodes.RESC_WAITING_MSGS, len(payload), payload)
+        self.__send_packet(client_socket, response)
+
 

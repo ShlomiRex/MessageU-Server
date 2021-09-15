@@ -129,6 +129,14 @@ class Database:
         else:
             return True, message_id
 
+    def get_messages(self, to_client: str):
+        UsersSanitizer.client_id(to_client)
+        sql = QUERY_MESSAGES_TO_CLIENT.format(client_id=to_client)
+        cur = self._conn.cursor()
+        cur.execute(sql)
+        res = cur.fetchall()
+
+        return res
 
 class UserNotExistDBException(Exception):
     pass
