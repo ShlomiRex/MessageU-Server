@@ -5,10 +5,10 @@ import logging
 from Database.Database import Database, UserNotExistDBException
 from Server.OpCodes import ResponseCodes, RequestCodes, MessageTypes
 from Server.ProtocolDefenitions import S_USERNAME, S_CLIENT_ID, S_REQUEST_HEADER, S_PUBLIC_KEY, S_MESSAGE_TYPE, \
-    S_CONTENT_SIZE
+    S_CONTENT_SIZE, S_MESSAGE_ID
 
 from Server.Request import RequestHeader, unpack_request_header
-from Server.Response import BaseResponse
+from Server.Response import BaseResponse, MessageResponse
 
 SELECT_TIMEOUT = 1
 logger = logging.getLogger(__name__)
@@ -48,30 +48,28 @@ class Server:
         logger.info(f"Server is listening on: {self.ip}:{self.port}")
         while self._is_running and self.inputs:
             readable, writeable, exceptions = select.select(self.inputs, [], [], SELECT_TIMEOUT)
-            if len(readable) > 0:
-                logger.debug(f"Readables: {readable}")
-            if len(writeable) > 0:
-                logger.debug(f"Writeables: {writeable}")
-            if len(exceptions) > 0:
-                logger.debug(f"Exceptions: {exceptions}")
-
-            for sock in readable:
-                if sock is self.server_sock:
+            for client_socket in readable:
+                if client_socket is self.server_sock:
                     client, address = self.server_sock.accept()
                     self.inputs.append(client)
                     logger.info(f"New client connection from: {address}")
                 else:
                     try:
-                        self.__handle_request(sock)
+                        self.__handle_request(client_socket)
                     except (ConnectionResetError, ConnectionAbortedError):
                         logger.info("A client has disconnected")
-                        sock.close()
-                        self.inputs.remove(sock)
+
+                        client_socket.close()
+                        self.inputs.remove(client_socket)
                     except Exception as e:
                         logger.exception(e)
-                        self.inputs.remove(sock)
-                        logger.error(f"Client exited: {sock.getpeername()}")
-                        sock.close()
+
+                        logger.info("Sending error message to client...")
+                        self.__send_error(client_socket)
+
+                        logger.error(f"Forcing connection close with client: {client_socket.getpeername()}")
+                        client_socket.close()
+                        self.inputs.remove(client_socket)
         logger.info("Server finished running")
         self.server_sock.close()
 
@@ -83,11 +81,10 @@ class Server:
         return unpack_request_header(buff)
 
     def __send_error(self, client_socket: socket):
-        logger.warning("Sending error response...")
+        logger.info("Sending error response...")
         response = BaseResponse(self.version, ResponseCodes.RESC_ERROR, 0, b'')
         packet = response.pack()
         client_socket.sendall(packet)
-        logger.warning("OK")
 
     def __handle_request(self, client_socket: socket):
         header = self.__receive_request_header(client_socket)
@@ -96,116 +93,131 @@ class Server:
         logger.info("Handling request")
 
         if header.code == RequestCodes.REQC_REGISTER_USER:
-            logger.info("Handling register request...")
-
-            username = client_socket.recv(S_USERNAME).decode().rstrip('\x00')
-            pub_key = client_socket.recv(S_PUBLIC_KEY)
-
-            # First check is name in database
-            register_success, client_id = self.database.registerUser(username, pub_key)
-            if register_success:
-                response = BaseResponse(self.version, ResponseCodes.RESC_REGISTER_SUCCESS, S_CLIENT_ID, client_id)
-                self.__send_packet(client_socket, response)
-            else:
-                self.__send_error(client_socket)
-
-            logger.info("Finished handling register request.")
+            self.__handle_register_request(client_socket)
 
         elif header.code == RequestCodes.REQC_CLIENT_LIST:
-            logger.info("Handling client list request...")
-
-            # Get users to send
-            users = self.database.getAllUsers()
-            # Minus 1 because registered user will not get his own data.
-            payload_size = (S_CLIENT_ID + S_USERNAME) * (len(users) - 1)
-
-            # Send first packet which contains headers and payload size.
-            response = BaseResponse(self.version, ResponseCodes.RESC_LIST_USERS, payload_size, None)
-            client_socket.send(response.pack())
-
-            # Send the rest of the payload in chunks
-            for client_id, username in users:
-                # Convert DB string of hex to bytes.
-                client_id_hex_bytes = bytes.fromhex(client_id)
-
-                # Don't send the requestee his own data. Compare bytes to bytes.
-                if client_id_hex_bytes == header.clientId:
-                    continue
-
-                # Send the user data.
-                client_id_payload = bytes.fromhex(client_id)
-                username_null_padded_payload = username.ljust(S_USERNAME, '\0')
-                payload = client_id_payload + username_null_padded_payload.encode()
-                client_socket.send(payload)
-
-            logger.info("Finished handling users list request.")
+            self.__handle_client_list_request(client_socket, header)
 
         elif header.code == RequestCodes.REQC_PUB_KEY:
-            logger.info("Handling public key request...")
-            client_id = client_socket.recv(S_CLIENT_ID)
-            try:
-                pub_key = self.database.getUserByClientId(client_id.hex())[3]
-                pub_key_bytes = bytes.fromhex(pub_key)
-                payload = client_id + pub_key_bytes
-                response = BaseResponse(self.version, ResponseCodes.RESC_PUBLIC_KEY, S_CLIENT_ID + S_PUBLIC_KEY, payload)
-                self.__send_packet(client_socket, response)
-            except UserNotExistDBException:
-                self.__send_error(client_socket)
+            self.__handle_pub_key_request(client_socket)
 
         elif header.code == RequestCodes.REQC_SEND_MESSAGE:
-            logger.info("Handling send message request...")
-
-            # Get message header
-            dst_client_id = client_socket.recv(S_CLIENT_ID)
-            message_type = client_socket.recv(S_MESSAGE_TYPE)
-            content_size = client_socket.recv(S_CONTENT_SIZE)
-
-            # Process
-            message_type_int = int.from_bytes(message_type, "little", signed=False)
-            message_type_enum = MessageTypes(message_type_int)
-            content_size_int = int.from_bytes(content_size, "little", signed=False)
-            to_client = dst_client_id
-            from_client = header.clientId
-
-            # Check type
-            if message_type_enum == MessageTypes.REQ_SYMMETRIC_KEY:
-                # No message content then
-
-                if content_size_int != 0:
-                    logger.error(f"Expected content of size 0 in symmetric key request, instead got content size: {content_size_int}")
-                    self.__send_error(client_socket)
-                    return
-
-                logger.info(f"Request for symmetric key from: {from_client.hex(' ', 2)} to: {to_client.hex(' ', 2)}")
-
-                # Check recipient exists
-                if not self.database.isClientIdExists(dst_client_id.hex()):
-                    logger.error("Destination recipient doesn't exist!")
-                    self.__send_error(client_socket)
-                    return
-                else:
-                    logger.debug("Destination client id exists!")
-                    logger.info("Inserting message to database...")
-                    success = self.database.insertMessage(to_client.hex(), from_client.hex(),
-                                                          message_type_int, content_size_int, None)
-                    if not success:
-                        self.__send_error(client_socket)
-                    else:
-                        logger.info("Success!")
-                pass
-            else:
-                raise ValueError(f"Message type: {message_type} is not recognized.")
+            self.__handle_send_message_request(client_socket, header)
 
         else:
             raise ValueError("Request code: " + str(header.code) + " is not recognized.")
 
+    def __handle_register_request(self, client_socket: socket):
+        logger.info("Handling register request...")
+
+        username = client_socket.recv(S_USERNAME).decode().rstrip('\x00')
+        pub_key = client_socket.recv(S_PUBLIC_KEY)
+
+        # First check is name in database
+        try:
+            register_success, client_id = self.database.register_user(username, pub_key)
+            response = BaseResponse(self.version, ResponseCodes.RESC_REGISTER_SUCCESS, S_CLIENT_ID, client_id)
+            self.__send_packet(client_socket, response)
+        except UserNotExistDBException:
+            self.__send_error(client_socket)
+
+        logger.info("Finished handling register request.")
+
+    def __handle_client_list_request(self, client_socket: socket, header: RequestHeader):
+        logger.info("Handling client list request...")
+
+        # Get users to send
+        users = self.database.get_all_users()
+        # Minus 1 because registered user will not get his own data.
+        payload_size = (S_CLIENT_ID + S_USERNAME) * (len(users) - 1)
+
+        # Send first packet which contains headers and payload size.
+        response = BaseResponse(self.version, ResponseCodes.RESC_LIST_USERS, payload_size, None)
+        packet = response.pack()
+        client_socket.send(packet)
+
+        # Send the rest of the payload in chunks
+        for client_id, username in users:
+            # Convert DB string of hex to bytes.
+            client_id_hex_bytes = bytes.fromhex(client_id)
+
+            # Don't send the requestee his own data. Compare bytes to bytes.
+            if client_id_hex_bytes == header.clientId:
+                continue
+
+            # Send the user data.
+            client_id_payload = bytes.fromhex(client_id)
+            username_null_padded_payload = username.ljust(S_USERNAME, '\0')
+            payload = client_id_payload + username_null_padded_payload.encode()
+            client_socket.send(payload)
+
+        logger.info("Finished handling users list request.")
 
     def __send_packet(self, client_socket: socket, response: BaseResponse):
-        payload = response.pack()
-        logger.debug(f"Sending response ({len(payload)} bytes): {payload}")
-        logger.debug(f"Response (parsed): {response}")
-        client_socket.sendall(payload)
+        packet = response.pack()
+        logger.debug(f"Sending response (parsed): {response}")
+        client_socket.sendall(packet)
         logger.debug("Sent!")
 
     def shutdown(self):
         self._is_running = False
+
+    def __handle_pub_key_request(self, client_socket: socket):
+        logger.info("Handling public key request...")
+        client_id = client_socket.recv(S_CLIENT_ID)
+        try:
+            pub_key = self.database.get_user_by_client_id(client_id.hex())[3]
+            pub_key_bytes = bytes.fromhex(pub_key)
+            payload = client_id + pub_key_bytes
+            response = BaseResponse(self.version, ResponseCodes.RESC_PUBLIC_KEY, S_CLIENT_ID + S_PUBLIC_KEY, payload)
+            self.__send_packet(client_socket, response)
+        except UserNotExistDBException:
+            self.__send_error(client_socket)
+
+    def __handle_send_message_request(self, client_socket: socket, header: RequestHeader):
+        logger.info("Handling send message request...")
+
+        # Get message header
+        dst_client_id = client_socket.recv(S_CLIENT_ID)
+        message_type = client_socket.recv(S_MESSAGE_TYPE)
+        content_size = client_socket.recv(S_CONTENT_SIZE)
+
+        # Process
+        message_type_int = int.from_bytes(message_type, "little", signed=False)
+        message_type_enum = MessageTypes(message_type_int)
+        content_size_int = int.from_bytes(content_size, "little", signed=False)
+        to_client = dst_client_id
+        from_client = header.clientId
+
+        # Check type
+        if message_type_enum == MessageTypes.REQ_SYMMETRIC_KEY:
+            # No message content then
+
+            if content_size_int != 0:
+                logger.error(f"Expected content of size 0 in symmetric key request, instead got content size: {content_size_int}")
+                self.__send_error(client_socket)
+                return
+
+            logger.info(f"Request for symmetric key from: {from_client.hex(' ', 2)} to: {to_client.hex(' ', 2)}")
+
+            # Check recipient exists
+            if not self.database.is_client_exists(dst_client_id.hex()):
+                logger.error("Destination recipient doesn't exist!")
+                self.__send_error(client_socket)
+                return
+            else:
+                logger.debug("Destination client id exists!")
+                logger.info("Inserting message to database...")
+                success, message_id = self.database.insert_message(to_client.hex(), from_client.hex(), message_type_int, content_size_int, None)
+                if not success:
+                    self.__send_error(client_socket)
+                else:
+                    logger.info("Success!")
+                    payload_size = S_CLIENT_ID + S_MESSAGE_ID
+                    payload = MessageResponse(dst_client_id, message_id)
+                    response = BaseResponse(self.version, ResponseCodes.RESC_SEND_TEXT, payload_size, payload)
+                    self.__send_packet(client_socket, response)
+            pass
+        else:
+            raise ValueError(f"Message type: {message_type} is not recognized.")
+

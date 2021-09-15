@@ -33,12 +33,12 @@ class MainTestingClass(unittest.TestCase):
         sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         sock.connect((IP, PORT))
 
-        self.assertIsNone(server.database.getUser("shlomi"))
+        self.assertIsNone(server.database.get_user("shlomi"))
 
         sock.sendall(buff) # Insert 'shlomi' user
         time.sleep(1)
 
-        self.assertIsNotNone(server.database.getUser("shlomi"))
+        self.assertIsNotNone(server.database.get_user("shlomi"))
 
         sock.close()
 
