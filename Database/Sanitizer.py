@@ -104,3 +104,14 @@ class MessagesSanitizer:
         MessagesSanitizer.content_size(content_size)
         if len(content) != content_size:
             raise ValueError("Size of content is not equal to content size.")
+
+    @classmethod
+    def id(cls, _id):
+        if _id is None:
+            raise ValueError("Database input must be set. None is not allowed.")
+
+        if not isinstance(_id, int):
+            raise TypeError("Message ID must be integer.")
+
+        if _id < 0:
+            raise ValueError("Message ID can't be negative.")

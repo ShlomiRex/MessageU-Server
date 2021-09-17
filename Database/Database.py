@@ -138,5 +138,14 @@ class Database:
 
         return res
 
+    def deleteMessage(self, _id):
+        MessagesSanitizer.id(_id)
+        sql = QUERY_DELETE_MESSAGE.format(id=_id)
+        cur = self._conn.cursor()
+        logger.debug(f"Deleting message: {_id}")
+        cur.execute(sql)
+        self._conn.commit()
+
+
 class UserNotExistDBException(Exception):
     pass

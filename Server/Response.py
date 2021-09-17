@@ -35,22 +35,30 @@ class BaseResponse:
     payloadSize: int
     payload: Union[bytes, MessageResponse, list[ResponsePayload_PullMessage], None]
 
+    def __pack_no_payload(self):
+        fmt = f"<cHI"
+        return struct.pack(fmt, self.version.to_bytes(1, "little", signed=False), self.code.value, self.payloadSize)
+
+    def __pack_with_payload(self, packet: bytes):
+        fmt = f"<cHI{self.payloadSize}s"
+        return struct.pack(fmt, self.version.to_bytes(1, "little", signed=False), self.code.value, self.payloadSize, packet)
+
     def pack(self) -> bytes:
         if self.payload is not None:
-            # We have payload
+            # We have payload - check instance of payload
             if isinstance(self.payload, bytes):
                 if len(self.payload) > 0:
-                    fmt = f"<cHI{self.payloadSize}s"
-                    return struct.pack(fmt, self.version.to_bytes(1, "little", signed=False), self.code.value, self.payloadSize, self.payload)
+                    return self.__pack_with_payload(self.payload)
                 else:
-                    raise ValueError("Length of payload is 0 but payload is not None!")
+                    if self.payload == b'':
+                        return self.__pack_no_payload()
+                    else:
+                        raise ValueError("Length of payload is 0 but payload is not None!")
             elif isinstance(self.payload, MessageResponse):
-                fmt = f"<cHI{self.payloadSize}s"
-                payload = self.payload.pack()
-                return struct.pack(fmt, self.version.to_bytes(1, "little", signed=False), self.code.value, self.payloadSize, payload)
+                # We don't change self.payload. For esthetics.
+                return self.__pack_with_payload(self.payload.pack())
             else:
                 raise ValueError("Instance of payload is not recognized.")
         else:
             # We don't have payload
-            fmt = f"<cHI"
-            return struct.pack(fmt, self.version.to_bytes(1, "little", signed=False), self.code.value, self.payloadSize)
+            return self.__pack_no_payload()

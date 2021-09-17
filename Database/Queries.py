@@ -65,3 +65,7 @@ QUERY_SELECT_USER_BY_CLIENT_ID = """
 QUERY_MESSAGES_TO_CLIENT = """
     SELECT * FROM Messages WHERE to_client='{client_id}';
 """
+
+QUERY_DELETE_MESSAGE = """
+    DELETE FROM Messages WHERE id={id};
+"""

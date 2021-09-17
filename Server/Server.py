@@ -22,7 +22,7 @@ class Server:
         :param ip: Ip to bind to
         :param max_clients_queue: Maximum concurrent users in queue (if over, server refuses to server new user)
         """
-        self.version = 1
+        self.version = 2
         self.port = port
         self.ip = ip
 
@@ -225,7 +225,7 @@ class Server:
             raise ValueError(f"Message type: {message_type} is not recognized.")
 
     def __handle_pull_waiting_messages(self, client_socket: socket, header: RequestHeader):
-        # No payload. No need to read from socket.
+        # No request payload. No need to read from socket.
 
         # The one who send this request, we take all of the messages that have 'to_client' equal to him.
         requestee = header.clientId.hex()
@@ -234,21 +234,21 @@ class Server:
         payload = b''
 
         if db_messages is not None and len(db_messages) != 0:
-            messages = []
             for db_message in db_messages:
-                # Unpack
-                id, to_client, from_client, type, content_size, content = db_message
+                # Unpack tuple
+                _id, to_client, from_client, _type, content_size, content = db_message
 
                 # Process
-                type_enum = MessageTypes(type)
+                type_enum = MessageTypes(_type)
                 from_client_bytes = bytes.fromhex(from_client)
 
                 # Create payload
-                _payload = ResponsePayload_PullMessage(from_client_bytes, id, type_enum, content_size, content)
+                _payload = ResponsePayload_PullMessage(from_client_bytes, _id, type_enum, content_size, content)
                 packet = _payload.pack()
                 payload += packet
 
+                # Delete from database
+                self.database.deleteMessage(_id)
+
         response = BaseResponse(self.version, ResponseCodes.RESC_WAITING_MSGS, len(payload), payload)
         self.__send_packet(client_socket, response)
-
-
