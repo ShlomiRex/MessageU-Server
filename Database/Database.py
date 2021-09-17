@@ -146,6 +146,14 @@ class Database:
         cur.execute(sql)
         self._conn.commit()
 
+    def update_last_seen(self, clientId: str):
+        UsersSanitizer.client_id(clientId)
+        unix_epoch = int(time.time())
+        sql = QUERY_UPDATE_LAST_SEEN.format(last_seen=unix_epoch)
+        cur = self._conn.cursor()
+        cur.execute(sql)
+        self._conn.commit()
+
 
 class UserNotExistDBException(Exception):
     pass

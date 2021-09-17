@@ -69,3 +69,7 @@ QUERY_MESSAGES_TO_CLIENT = """
 QUERY_DELETE_MESSAGE = """
     DELETE FROM Messages WHERE id={id};
 """
+
+QUERY_UPDATE_LAST_SEEN = """
+    UPDATE Users SET last_seen={last_seen};
+"""

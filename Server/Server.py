@@ -93,6 +93,9 @@ class Server:
         header = self.__receive_request_header(client_socket)
         logger.debug(f"Header: {header}")
 
+        # Update user last seen
+        self.database.update_last_seen(header.clientId.hex())
+
         logger.info("Handling request")
 
         if header.code == RequestCodes.REQC_REGISTER_USER:
