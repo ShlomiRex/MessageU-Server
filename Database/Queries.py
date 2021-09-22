@@ -25,7 +25,7 @@ QUERY_CREATE_MESSAGES_TABLE = """
 
 QUERY_INSERT_MESSAGE = """
     INSERT INTO Messages (to_client, from_client, type, content_size, content) 
-    VALUES ('{to_client}', '{from_client}', {type}, {content_size}, '{content}');
+    VALUES ('{to_client}', '{from_client}', {type}, {content_size}, (?));
 """
 
 QUERY_INSERT_MESSAGE_WITHOUT_CONTENT = """

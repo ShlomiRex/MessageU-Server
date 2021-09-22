@@ -12,10 +12,13 @@ class ResponsePayload_PullMessage:
     messageId: int
     messageType: MessageTypes
     messageSize: int
-    content: bytes
+    content: Optional[bytes]
 
     def pack(self):
-        return struct.pack(f"<{S_CLIENT_ID}sIBI", self.from_client_id, self.messageId, self.messageType.value, self.messageSize)
+        if self.content is None or self.content == b'':
+            return struct.pack(f"<{S_CLIENT_ID}sIBI", self.from_client_id, self.messageId, self.messageType.value, self.messageSize)
+        else:
+            return struct.pack(f"<{S_CLIENT_ID}sIBI{self.messageSize}s", self.from_client_id, self.messageId, self.messageType.value, self.messageSize, self.content)
 
 
 @dataclass

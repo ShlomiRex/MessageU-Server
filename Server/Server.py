@@ -178,6 +178,7 @@ class Server:
             response = BaseResponse(self.version, ResponseCodes.RESC_PUBLIC_KEY, S_CLIENT_ID + S_PUBLIC_KEY, payload)
             self.__send_packet(client_socket, response)
         except UserNotExistDBException:
+            logger.error("User not exist!")
             self.__send_error(client_socket)
 
     def __handle_send_message_request(self, client_socket: socket, header: RequestHeader):
@@ -197,6 +198,7 @@ class Server:
 
         # Check type
         if message_type_enum == MessageTypes.REQ_SYMMETRIC_KEY:
+            logger.info("Handling get symmetric key request...")
             # No message content then
 
             if content_size_int != 0:
@@ -224,10 +226,36 @@ class Server:
                     response = BaseResponse(self.version, ResponseCodes.RESC_SEND_TEXT, payload_size, payload)
                     self.__send_packet(client_socket, response)
             pass
+        elif message_type_enum == MessageTypes.SEND_SYMMETRIC_KEY:
+            logger.info("Handling send symmetric key request...")
+
+            logger.info(f"Request for sending symmetric key from: {from_client.hex(' ', 2)} to: {to_client.hex(' ', 2)}")
+            # Check recipient exists
+            if not self.database.is_client_exists(dst_client_id.hex()):
+                logger.error("Destination recipient doesn't exist!")
+                self.__send_error(client_socket)
+                return
+            else:
+                logger.debug("Destination client id exists!")
+
+                content_size_int = int.from_bytes(content_size, "little", signed=False)
+                message_content = client_socket.recv(content_size_int)
+
+                logger.info("Inserting message to database...")
+                success, message_id = self.database.insert_message(to_client.hex(), from_client.hex(), message_type_int, content_size_int, message_content)
+                if not success:
+                    self.__send_error(client_socket)
+                else:
+                    logger.info("Success!")
+                    payload_size = S_CLIENT_ID + S_MESSAGE_ID
+                    payload = MessageResponse(dst_client_id, message_id)
+                    response = BaseResponse(self.version, ResponseCodes.RESC_SEND_TEXT, payload_size, payload)
+                    self.__send_packet(client_socket, response)
         else:
             raise ValueError(f"Message type: {message_type} is not recognized.")
 
     def __handle_pull_waiting_messages(self, client_socket: socket, header: RequestHeader):
+        logger.info("Handling pull messages request...")
         # No request payload. No need to read from socket.
 
         # The one who send this request, we take all of the messages that have 'to_client' equal to him.

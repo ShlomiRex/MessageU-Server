@@ -112,13 +112,15 @@ class Database:
         UsersSanitizer.client_id(from_client)
         MessagesSanitizer.message_type(message_type)
         MessagesSanitizer.content_size(content_size)
+
+        cur = self._conn.cursor()
         if content_size > 0:
             MessagesSanitizer.content(content_size, content)
-            sql = QUERY_INSERT_MESSAGE.format(to_client=to_client, from_client=from_client, type=message_type, content_size=content_size, content=content)
+            sql = QUERY_INSERT_MESSAGE.format(to_client=to_client, from_client=from_client, type=message_type, content_size=content_size)
+            cur.execute(sql, (sqlite3.Binary(content),))
         else:
             sql = QUERY_INSERT_MESSAGE_WITHOUT_CONTENT.format(to_client=to_client, from_client=from_client, type=message_type)
-        cur = self._conn.cursor()
-        cur.execute(sql)
+            cur.execute(sql)
         self._conn.commit()
 
         message_id = cur.lastrowid
