@@ -14,6 +14,11 @@ SELECT_TIMEOUT = 1
 logger = logging.getLogger(__name__)
 
 
+class ProtocolError(Exception):
+    def __init__(self, message: str):
+        super.__init__(message)
+
+
 class Server:
     def __init__(self, port: int, ip: str = "127.0.0.1", max_clients_queue: int = 5):
         """
@@ -171,15 +176,12 @@ class Server:
     def __handle_pub_key_request(self, client_socket: socket):
         logger.info("Handling public key request...")
         client_id = client_socket.recv(S_CLIENT_ID)
-        try:
-            pub_key = self.database.get_user_by_client_id(client_id.hex())[3]
-            pub_key_bytes = bytes.fromhex(pub_key)
-            payload = client_id + pub_key_bytes
-            response = BaseResponse(self.version, ResponseCodes.RESC_PUBLIC_KEY, S_CLIENT_ID + S_PUBLIC_KEY, payload)
-            self.__send_packet(client_socket, response)
-        except UserNotExistDBException:
-            logger.error("User not exist!")
-            self.__send_error(client_socket)
+
+        pub_key = self.database.get_user_by_client_id(client_id.hex())[3]
+        pub_key_bytes = bytes.fromhex(pub_key)
+        payload = client_id + pub_key_bytes
+        response = BaseResponse(self.version, ResponseCodes.RESC_PUBLIC_KEY, S_CLIENT_ID + S_PUBLIC_KEY, payload)
+        self.__send_packet(client_socket, response)
 
     def __handle_send_message_request(self, client_socket: socket, header: RequestHeader):
         logger.info("Handling send message request...")
@@ -191,68 +193,45 @@ class Server:
 
         # Process
         message_type_int = int.from_bytes(message_type, "little", signed=False)
-        message_type_enum = MessageTypes(message_type_int)
-        content_size_int = int.from_bytes(content_size, "little", signed=False)
+        try:
+            message_type_enum = MessageTypes(message_type_int)
+        except Exception:
+            raise ValueError(
+                f"Couldn't parse message type to enum. Message type: {message_type_int} is not recognized.")
         to_client = dst_client_id
         from_client = header.clientId
+        content_size_int = int.from_bytes(content_size, "little", signed=False)
+
+        logger.info(f"Request message from: {from_client.hex(' ', 2)} to: {to_client.hex(' ', 2)}")
 
         # Check type
         if message_type_enum == MessageTypes.REQ_SYMMETRIC_KEY:
             logger.info("Handling get symmetric key request...")
-            # No message content then
 
+            # No message content then. Check if no content (must be zero)
             if content_size_int != 0:
-                logger.error(f"Expected content of size 0 in symmetric key request, instead got content size: {content_size_int}")
-                self.__send_error(client_socket)
-                return
+                raise ProtocolError(
+                    f"Expected content of size 0 in symmetric key request, instead got content size: {content_size_int}")
 
-            logger.info(f"Request for symmetric key from: {from_client.hex(' ', 2)} to: {to_client.hex(' ', 2)}")
+            msg_content = None
 
-            # Check recipient exists
-            if not self.database.is_client_exists(dst_client_id.hex()):
-                logger.error("Destination recipient doesn't exist!")
-                self.__send_error(client_socket)
-                return
-            else:
-                logger.debug("Destination client id exists!")
-                logger.info("Inserting message to database...")
-                success, message_id = self.database.insert_message(to_client.hex(), from_client.hex(), message_type_int, content_size_int, None)
-                if not success:
-                    self.__send_error(client_socket)
-                else:
-                    logger.info("Success!")
-                    payload_size = S_CLIENT_ID + S_MESSAGE_ID
-                    payload = MessageResponse(dst_client_id, message_id)
-                    response = BaseResponse(self.version, ResponseCodes.RESC_SEND_TEXT, payload_size, payload)
-                    self.__send_packet(client_socket, response)
-            pass
-        elif message_type_enum == MessageTypes.SEND_SYMMETRIC_KEY:
-            logger.info("Handling send symmetric key request...")
-
-            logger.info(f"Request for sending symmetric key from: {from_client.hex(' ', 2)} to: {to_client.hex(' ', 2)}")
-            # Check recipient exists
-            if not self.database.is_client_exists(dst_client_id.hex()):
-                logger.error("Destination recipient doesn't exist!")
-                self.__send_error(client_socket)
-                return
-            else:
-                logger.debug("Destination client id exists!")
-
-                content_size_int = int.from_bytes(content_size, "little", signed=False)
-                message_content = client_socket.recv(content_size_int)
-
-                logger.info("Inserting message to database...")
-                success, message_id = self.database.insert_message(to_client.hex(), from_client.hex(), message_type_int, content_size_int, message_content)
-                if not success:
-                    self.__send_error(client_socket)
-                else:
-                    logger.info("Success!")
-                    payload_size = S_CLIENT_ID + S_MESSAGE_ID
-                    payload = MessageResponse(dst_client_id, message_id)
-                    response = BaseResponse(self.version, ResponseCodes.RESC_SEND_TEXT, payload_size, payload)
-                    self.__send_packet(client_socket, response)
         else:
-            raise ValueError(f"Message type: {message_type} is not recognized.")
+            # Else - we already check enum. If type is not castable to the enum, then we throw there exception.
+            logger.info("Handling send text message request...")
+
+            msg_content = client_socket.recv(content_size_int)
+
+        # Insert message
+        success, message_id = self.database.insert_message(to_client.hex(), from_client.hex(), message_type_int, msg_content)
+
+        # Check insertion success
+        if not success:
+            self.__send_error(client_socket)
+        else:
+            payload_size = S_CLIENT_ID + S_MESSAGE_ID
+            payload = MessageResponse(dst_client_id, message_id)
+            response = BaseResponse(self.version, ResponseCodes.RESC_SEND_TEXT, payload_size, payload)
+            self.__send_packet(client_socket, response)
 
     def __handle_pull_waiting_messages(self, client_socket: socket, header: RequestHeader):
         logger.info("Handling pull messages request...")
@@ -279,7 +258,7 @@ class Server:
                 payload += packet
 
                 # Delete from database
-                self.database.deleteMessage(_id)
+                self.database.delete_message(_id)
 
         response = BaseResponse(self.version, ResponseCodes.RESC_WAITING_MSGS, len(payload), payload)
         self.__send_packet(client_socket, response)

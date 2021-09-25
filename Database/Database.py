@@ -54,14 +54,15 @@ class Database:
             UsersSanitizer.client_id(client_id_hex)
             UsersSanitizer.pub_key(pub_key_hex)
             UsersSanitizer.last_seen(unix_epoch)
-            sql = QUERY_INSERT_USER.format(username=username, client_id=client_id_hex, public_key=pub_key_hex, last_seen=unix_epoch)
+            sql = QUERY_INSERT_USER.format(username=username, client_id=client_id_hex, public_key=pub_key_hex,
+                                           last_seen=unix_epoch)
             cur = self._conn.cursor()
             cur.execute(sql)
             self._conn.commit()
             logger.debug("Added user to DB!")
             return True, client_id.bytes
         else:
-            raise UserNotExistDBException()
+            raise UserAlreadyExists(username)
 
     def get_user(self, username: str):
         UsersSanitizer.username(username)
@@ -95,31 +96,42 @@ class Database:
         :return: Id (int), ClientId (hex str), Username (str), Public Key (hex str), Last seen (unix epoch int)
         """
         UsersSanitizer.client_id(client_id)
+
+        if not self.is_client_exists(client_id):
+            raise UserNotExistDBException(client_id)
+
         sql = QUERY_SELECT_USER_BY_CLIENT_ID.format(client_id=client_id)
         cur = self._conn.cursor()
         cur.execute(sql)
         res = cur.fetchone()
 
         if res is None or len(res) == 0:
-            raise UserNotExistDBException()
+            raise UserNotExistDBException(client_id)
         else:
             return res
 
-    def insert_message(self, to_client: str, from_client: str, message_type: int, content_size: int, content: Optional[bytes]) -> (bool, Optional[int]):
+    def insert_message(self, to_client: str, from_client: str, message_type: int, content: Optional[bytes]) -> (bool, Optional[int]):
         logger.debug(f"Inserting message from: {from_client} to: {to_client}")
 
         UsersSanitizer.client_id(to_client)
         UsersSanitizer.client_id(from_client)
         MessagesSanitizer.message_type(message_type)
-        MessagesSanitizer.content_size(content_size)
+
+        if not self.is_client_exists(to_client):
+            raise UserNotExistDBException(to_client)
+        if not self.is_client_exists(from_client):
+            raise UserNotExistDBException(from_client)
 
         cur = self._conn.cursor()
-        if content_size > 0:
-            MessagesSanitizer.content(content_size, content)
-            sql = QUERY_INSERT_MESSAGE.format(to_client=to_client, from_client=from_client, type=message_type, content_size=content_size)
+
+        if content is not None and len(content) > 0:
+            MessagesSanitizer.content(len(content), content)
+            sql = QUERY_INSERT_MESSAGE.format(to_client=to_client, from_client=from_client, type=message_type,
+                                              content_size=len(content))
             cur.execute(sql, (sqlite3.Binary(content),))
         else:
-            sql = QUERY_INSERT_MESSAGE_WITHOUT_CONTENT.format(to_client=to_client, from_client=from_client, type=message_type)
+            sql = QUERY_INSERT_MESSAGE_WITHOUT_CONTENT.format(to_client=to_client, from_client=from_client,
+                                                              type=message_type)
             cur.execute(sql)
         self._conn.commit()
 
@@ -133,6 +145,10 @@ class Database:
 
     def get_messages(self, to_client: str):
         UsersSanitizer.client_id(to_client)
+
+        if not self.is_client_exists(to_client):
+            raise UserNotExistDBException(to_client)
+
         sql = QUERY_MESSAGES_TO_CLIENT.format(client_id=to_client)
         cur = self._conn.cursor()
         cur.execute(sql)
@@ -140,7 +156,7 @@ class Database:
 
         return res
 
-    def deleteMessage(self, _id):
+    def delete_message(self, _id):
         MessagesSanitizer.id(_id)
         sql = QUERY_DELETE_MESSAGE.format(id=_id)
         cur = self._conn.cursor()
@@ -148,8 +164,12 @@ class Database:
         cur.execute(sql)
         self._conn.commit()
 
-    def update_last_seen(self, clientId: str):
-        UsersSanitizer.client_id(clientId)
+    def update_last_seen(self, client_id: str):
+        UsersSanitizer.client_id(client_id)
+
+        if not self.is_client_exists(client_id):
+            raise UserNotExistDBException(client_id)
+
         unix_epoch = int(time.time())
         sql = QUERY_UPDATE_LAST_SEEN.format(last_seen=unix_epoch)
         cur = self._conn.cursor()
@@ -158,4 +178,10 @@ class Database:
 
 
 class UserNotExistDBException(Exception):
-    pass
+    def __init__(self, client_id: str):
+        super().__init__(f"Client: {client_id} doesn't exist on DB!")
+
+
+class UserAlreadyExists(Exception):
+    def __init__(self, username: str):
+        super().__init__(f"Client: {username} already exists on DB!")
