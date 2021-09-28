@@ -56,6 +56,9 @@ class Server:
             for client_socket in readable:
                 if client_socket is self.server_sock:
                     client, address = self.server_sock.accept()
+
+                    # Set blocking. Threads deal with blocking.
+                    client.setblocking(True)  #TODO: Test
                     self.inputs.append(client)
                     logger.info(f"New client connection from: {address}")
                 else:
@@ -98,15 +101,16 @@ class Server:
         header = self.__receive_request_header(client_socket)
         logger.debug(f"Header: {header}")
 
-        # Update user last seen
-        self.database.update_last_seen(header.clientId.hex())
-
         logger.info("Handling request")
 
         if header.code == RequestCodes.REQC_REGISTER_USER:
             self.__handle_register_request(client_socket)
 
-        elif header.code == RequestCodes.REQC_CLIENT_LIST:
+        # Update user last seen
+        # We do this after registering, because user doesn't exist on DB if not registered.
+        self.database.update_last_seen(header.clientId.hex())
+
+        if header.code == RequestCodes.REQC_CLIENT_LIST:
             self.__handle_client_list_request(client_socket, header)
 
         elif header.code == RequestCodes.REQC_PUB_KEY:
@@ -120,6 +124,7 @@ class Server:
 
         else:
             raise ValueError("Request code: " + str(header.code) + " is not recognized.")
+
 
     def __handle_register_request(self, client_socket: socket):
         logger.info("Handling register request...")
@@ -215,8 +220,13 @@ class Server:
 
             msg_content = None
 
+        elif message_type_enum == MessageTypes.SEND_FILE:
+            logger.info("Handling send file request...")
+
+            msg_content = client_socket.recv(content_size_int)
+
         else:
-            # Else - we already check enum. If type is not castable to the enum, then we throw there exception.
+            # Else - we already check enum. If type is not castable to the enum, then we throw there exception. So it's fine to ask 'else'.
             logger.info("Handling send text message request...")
 
             msg_content = client_socket.recv(content_size_int)
