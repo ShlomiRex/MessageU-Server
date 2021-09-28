@@ -13,6 +13,8 @@ USERNAME_BLACKLIST_REGEX = [
     r'SELECT (\w+|\*) FROM .*'
 ]
 
+USERNAME_ALLOWED_ASCII_START = 32
+USERNAME_ALLOWED_ASCII_END = 127
 
 class UsersSanitizer:
     @staticmethod
@@ -33,6 +35,11 @@ class UsersSanitizer:
         for blacklisted_regex in USERNAME_BLACKLIST_REGEX:
             if re.match(blacklisted_regex, username, re.IGNORECASE):
                 raise ValueError(f"Username: '{username}' contains black listed regex: '{blacklisted_regex}'")
+
+        # Check allowed characters
+        for c in username:
+            if int(c) not in range(USERNAME_ALLOWED_ASCII_START, USERNAME_ALLOWED_ASCII_END + 1):
+                raise ValueError(f"Username: '{username}' contains disallowed character: '{c}' with ascii value: {int(c)}")
 
     @staticmethod
     def client_id(client_id_hex):
