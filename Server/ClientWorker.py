@@ -4,7 +4,7 @@ import threading
 import time
 
 from Database.Database import Database, UserNotExistDBException
-from Server import thread_format
+from Server import LOGGER_FORMAT_THREAD, LOGGER_DATE_FORMAT
 from Server.ProtocolDefenitions import S_USERNAME, S_CLIENT_ID, S_REQUEST_HEADER, S_PUBLIC_KEY, S_MESSAGE_TYPE, \
     S_CONTENT_SIZE, S_MESSAGE_ID, SERVER_VERSION
 from Server.Request import RequestHeader, unpack_request_header
@@ -13,10 +13,11 @@ from Server.Response import BaseResponse, MessageResponse, ResponsePayload_PullM
 
 
 logger = logging.getLogger(__name__)
+logger.propagate = False  # We add custom format, so we don't want to propagate the message to the root logger (duplicate messages)
 
 logger_handler = logging.StreamHandler()  # Handler for the logger
+logger_handler.setFormatter(logging.Formatter(LOGGER_FORMAT_THREAD, datefmt=LOGGER_DATE_FORMAT))
 logger.addHandler(logger_handler)
-logger_handler.setFormatter(logging.Formatter(thread_format))
 
 # Shared mutex object between worker threads
 database = Database()

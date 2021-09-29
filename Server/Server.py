@@ -6,9 +6,6 @@ from Server.ClientWorker import ClientWorker
 logger = logging.getLogger(__name__)
 
 
-
-
-
 class Server:
     def __init__(self, port: int, ip: str = "127.0.0.1"):
         """
