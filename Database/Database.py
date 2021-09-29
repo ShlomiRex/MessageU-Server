@@ -1,5 +1,6 @@
 import sqlite3
 import logging
+import threading
 import time
 import uuid
 from typing import Optional
@@ -11,8 +12,9 @@ from Database.Sanitizer import UsersSanitizer, MessagesSanitizer
 logger = logging.getLogger(MODULE_LOGGER_NAME)
 
 
-class Database:
+class Database():
     def __init__(self):
+        super().__init__()
         logger.debug("Connecting...")
         self._conn = sqlite3.connect(DB_LOCATION, check_same_thread=False)  # Multiple threads can use same cursor
         logger.debug("Connected!")
