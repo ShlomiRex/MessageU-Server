@@ -47,9 +47,12 @@ class Server:
 
             worker = ClientWorker(client_socket, on_worker_close)
             self.workers.append(worker)
+            logger.debug(f"Number of currently working threads: {len(self.workers)}")
+            worker.start()
 
-            worker.run()
         logger.info("Server finished running")
+        for w in self.workers:
+            w.join()
         self.server_sock.close()
 
     def shutdown(self):

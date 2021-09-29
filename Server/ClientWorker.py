@@ -1,6 +1,7 @@
 import logging
 import socket
 import threading
+import time
 
 from Database.Database import Database, UserNotExistDBException
 from Server import thread_format
@@ -28,15 +29,14 @@ class ProtocolError(Exception):
 
 class ClientWorker(threading.Thread):
     def __init__(self, client_socket: socket, on_close):
-        super().__init__()
+        super(ClientWorker, self).__init__()
         self.version = SERVER_VERSION
 
         self.client_socket = client_socket
         self.on_close = on_close
 
-    def run(self):
+    def run(self) -> None:
         global database
-
         logger.info("Running worker...")
 
         try:
@@ -45,27 +45,29 @@ class ClientWorker(threading.Thread):
 
             logger.info("Handling request")
 
+            # Unregistered API
             if header.code == RequestCodes.REQC_REGISTER_USER:
                 self.__handle_register_request()
 
-            # Update user last seen
-            # We do this after registering, because user doesn't exist on DB if not registered.
-            database.update_last_seen(header.clientId.hex())
-
-            if header.code == RequestCodes.REQC_CLIENT_LIST:
-                self.__handle_client_list_request(header)
-
-            elif header.code == RequestCodes.REQC_PUB_KEY:
-                self.__handle_pub_key_request()
-
-            elif header.code == RequestCodes.REQC_SEND_MESSAGE:
-                self.__handle_send_message_request(header)
-
-            elif header.code == RequestCodes.REQC_WAITING_MSGS:
-                self.__handle_pull_waiting_messages(header)
-
+            # Registered API
             else:
-                raise ValueError("Request code: " + str(header.code) + " is not recognized.")
+                # Update user last seen
+                database.update_last_seen(header.clientId.hex())
+
+                if header.code == RequestCodes.REQC_CLIENT_LIST:
+                    self.__handle_client_list_request(header)
+
+                elif header.code == RequestCodes.REQC_PUB_KEY:
+                    self.__handle_pub_key_request()
+
+                elif header.code == RequestCodes.REQC_SEND_MESSAGE:
+                    self.__handle_send_message_request(header)
+
+                elif header.code == RequestCodes.REQC_WAITING_MSGS:
+                    self.__handle_pull_waiting_messages(header)
+
+                else:
+                    raise ValueError("Request code: " + str(header.code) + " is not recognized.")
 
             # Call callback
             self.on_close(self)
@@ -128,6 +130,7 @@ class ClientWorker(threading.Thread):
         logger.info("Finished handling register request.")
 
     def __handle_client_list_request(self, header: RequestHeader):
+        time.sleep(20)
         logger.info("Handling client list request...")
 
         # Get users to send
