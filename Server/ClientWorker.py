@@ -6,7 +6,7 @@ import time
 from Database.Database import Database, UserNotExistDBException
 from Server import LOGGER_FORMAT_THREAD, LOGGER_DATE_FORMAT
 from Server.ProtocolDefenitions import S_USERNAME, S_CLIENT_ID, S_REQUEST_HEADER, S_PUBLIC_KEY, S_MESSAGE_TYPE, \
-    S_CONTENT_SIZE, S_MESSAGE_ID, SERVER_VERSION
+    S_CONTENT_SIZE, S_MESSAGE_ID, SERVER_VERSION, S_RECV_BUFF, S_RECV_CIPHER_BUFF
 from Server.Request import RequestHeader, unpack_request_header
 from Server.OpCodes import ResponseCodes, RequestCodes, MessageTypes
 from Server.Response import BaseResponse, MessageResponse, ResponsePayload_PullMessage
@@ -131,7 +131,6 @@ class ClientWorker(threading.Thread):
         logger.info("Finished handling register request.")
 
     def __handle_client_list_request(self, header: RequestHeader):
-        time.sleep(20)
         logger.info("Handling client list request...")
 
         # Get users to send
@@ -222,38 +221,45 @@ class ClientWorker(threading.Thread):
         from_client = header.clientId
         content_size_int = int.from_bytes(content_size, "little", signed=False)
 
-        logger.info(f"Request message from: {from_client.hex(' ', 2)} to: {to_client.hex(' ', 2)}")
-
+        logger.info(f"Request message from: '{from_client.hex()}' to: '{to_client.hex()}'")
         # Check type
         if message_type_enum == MessageTypes.REQ_SYMMETRIC_KEY:
             logger.info("Handling get symmetric key request...")
 
             # No message content then. Check if no content (must be zero)
             if content_size_int != 0:
-                raise ProtocolError(
-                    f"Expected content of size 0 in symmetric key request, instead got content size: {content_size_int}")
+                raise ProtocolError(f"Expected content of size 0 in symmetric key request, instead got content size: {content_size_int}")
 
-            msg_content = None
-
-        elif message_type_enum == MessageTypes.SEND_FILE:
+        if message_type_enum == MessageTypes.SEND_FILE:
             logger.info("Handling send file request...")
-
-            msg_content = self.client_socket.recv(content_size_int)
-
         else:
-            # Else - we already check enum. If type is not castable to the enum, then we throw there exception. So it's fine to ask 'else'.
             logger.info("Handling send text message request...")
 
-            msg_content = self.client_socket.recv(content_size_int)
-
         # Insert message
-        success, message_id = database.insert_message(to_client.hex(), from_client.hex(), message_type_int,
-                                                      msg_content)
+        success, message_id = database.insert_message(to_client.hex(), from_client.hex(), message_type_int, None)
 
         # Check insertion success
         if not success:
             self.__send_error()
         else:
+            # Check if message has payload.
+            if message_type_enum in (MessageTypes.SEND_FILE, MessageTypes.SEND_TEXT_MESSAGE):
+                # Get chunk by chunk.
+                bytes_left_to_recv = content_size_int
+                logger.info(f"Reading user's file ({content_size_int} bytes)...")
+                while bytes_left_to_recv > 0:
+                    # Get cipher
+                    if bytes_left_to_recv > S_RECV_CIPHER_BUFF:
+                        cipher = self.client_socket.recv(S_RECV_CIPHER_BUFF)
+                    else:
+                        cipher = self.client_socket.recv(bytes_left_to_recv)
+                    # TODO: Append to blob
+                    success = database.append_msg_payload(message_id, cipher)
+                    if not success:
+                        raise "Could not append cipher chunk to the database row."
+                logger.info("Finished reading user's file!")
+
+
             payload_size = S_CLIENT_ID + S_MESSAGE_ID
             payload = MessageResponse(dst_client_id, message_id)
             response = BaseResponse(self.version, ResponseCodes.RESC_SEND_TEXT, payload_size, payload)
