@@ -6,7 +6,6 @@ import uuid
 from typing import Optional
 
 from Database import MODULE_LOGGER_NAME, DB_LOCATION
-from .Queries import *
 from Database.Sanitizer import UsersSanitizer, MessagesSanitizer
 
 logger = logging.getLogger(MODULE_LOGGER_NAME)
@@ -30,14 +29,35 @@ class Database():
         cur = self._conn.cursor()
 
         logger.debug("Creating Users table...")
-        cur.execute(QUERY_CREATE_USERS_TABLE)
+
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS Users (
+                id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
+                client_id text NOT NULL UNIQUE,
+                name text NOT NULL,
+                public_key text NOT NULL,
+                last_seen INTEGER
+            );
+        """)
         self._conn.commit()
         logger.debug("OK")
 
         logger.debug("Creating Messages table...")
-        cur.execute(QUERY_CREATE_MESSAGES_TABLE)
+        cur.execute(
+            """
+            CREATE TABLE IF NOT EXISTS Messages (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                to_client TEXT NOT NULL,
+                from_client TEXT NOT NULL,
+                type INTEGER NOT NULL,
+                content_size INTEGER NOT NULL,
+                content blob
+            );
+            """
+        )
         self._conn.commit()
         logger.debug("OK")
+        cur.close()
 
     def register_user(self, username: str, pub_key: bytes) -> tuple[bool, bytes]:
         logger.info("Registering user: " + str(username))
@@ -56,11 +76,14 @@ class Database():
             UsersSanitizer.client_id(client_id_hex)
             UsersSanitizer.pub_key(pub_key_hex)
             UsersSanitizer.last_seen(unix_epoch)
-            sql = QUERY_INSERT_USER.format(username=username, client_id=client_id_hex, public_key=pub_key_hex,
-                                           last_seen=unix_epoch)
+
             cur = self._conn.cursor()
-            cur.execute(sql)
+            cur.execute("""
+                INSERT INTO Users (name, client_id, public_key, last_seen)
+                VALUES (?, ?, ?, ?);
+            """, [username, client_id_hex, pub_key_hex, unix_epoch])
             self._conn.commit()
+            cur.close()
             logger.debug("Added user to DB!")
             return True, client_id.bytes
         else:
@@ -68,23 +91,21 @@ class Database():
 
     def get_user(self, username: str):
         UsersSanitizer.username(username)
-        sql = QUERY_FIND_USERNAME.format(username=username)
         cur = self._conn.cursor()
-        cur.execute(sql)
+        cur.execute("SELECT * FROM Users WHERE name == ?;", username)
         row = cur.fetchone()
         return row
 
     def get_all_users(self) -> [tuple[str, str]]:
         cur = self._conn.cursor()
-        cur.execute(QUERY_SELECT_ALL_USERS)
+        cur.execute("SELECT client_id, name FROM Users;")
         res = cur.fetchall()
         return res
 
     def is_client_exists(self, client_id: str) -> bool:
         UsersSanitizer.client_id(client_id)
-        sql = QUERY_SELECT_USER_BY_CLIENT_ID.format(client_id=client_id)
         cur = self._conn.cursor()
-        cur.execute(sql)
+        cur.execute("SELECT * FROM Users WHERE client_id=?;", [client_id])
         res = cur.fetchone()
         if res is None or len(res) == 0:
             return False
@@ -102,9 +123,8 @@ class Database():
         if not self.is_client_exists(client_id):
             raise UserNotExistDBException(client_id)
 
-        sql = QUERY_SELECT_USER_BY_CLIENT_ID.format(client_id=client_id)
         cur = self._conn.cursor()
-        cur.execute(sql)
+        cur.execute("SELECT * FROM Users WHERE client_id=?;", [client_id])
         res = cur.fetchone()
 
         if res is None or len(res) == 0:
@@ -128,16 +148,20 @@ class Database():
 
         if content is not None and len(content) > 0:
             MessagesSanitizer.content(len(content), content)
-            sql = QUERY_INSERT_MESSAGE.format(to_client=to_client, from_client=from_client, type=message_type,
-                                              content_size=len(content))
-            cur.execute(sql, (sqlite3.Binary(content),))
+            cur.execute(
+                """
+                    INSERT INTO Messages (to_client, from_client, type, content_size, content) 
+                    VALUES (?, ?, ?, ?, ?);
+                """, [to_client, from_client, message_type, len(content), sqlite3.Binary(content)])
         else:
-            sql = QUERY_INSERT_MESSAGE_WITHOUT_CONTENT.format(to_client=to_client, from_client=from_client,
-                                                              type=message_type)
-            cur.execute(sql)
+            cur.execute(
+                """
+                    INSERT INTO Messages (to_client, from_client, type, content_size) 
+                    VALUES (?, ?, ?, 0);
+                """, [to_client, from_client, message_type])
         self._conn.commit()
-
         message_id = cur.lastrowid
+        cur.close()
 
         if cur.rowcount != 1:
             logger.error("Failed to insert a row!")
@@ -151,20 +175,19 @@ class Database():
         if not self.is_client_exists(to_client):
             raise UserNotExistDBException(to_client)
 
-        sql = QUERY_MESSAGES_TO_CLIENT.format(client_id=to_client)
         cur = self._conn.cursor()
-        cur.execute(sql)
+        cur.execute("SELECT * FROM Messages WHERE to_client=?;", [to_client])
         res = cur.fetchall()
 
         return res
 
     def delete_message(self, _id):
         MessagesSanitizer.id(_id)
-        sql = QUERY_DELETE_MESSAGE.format(id=_id)
         cur = self._conn.cursor()
         logger.debug(f"Deleting message: {_id}")
-        cur.execute(sql)
+        cur.execute("DELETE FROM Messages WHERE id=?;", [_id])
         self._conn.commit()
+        cur.close()
 
     def update_last_seen(self, client_id: str):
         UsersSanitizer.client_id(client_id)
@@ -173,16 +196,15 @@ class Database():
             raise UserNotExistDBException(client_id)
 
         unix_epoch = int(time.time())
-        sql = QUERY_UPDATE_LAST_SEEN.format(last_seen=unix_epoch)
         cur = self._conn.cursor()
-        cur.execute(sql)
+        cur.execute("UPDATE Users SET last_seen=?;", [unix_epoch])
         self._conn.commit()
+        cur.close()
 
 
 class UserNotExistDBException(Exception):
     def __init__(self, client_id: str):
         super().__init__(f"Client: {client_id} doesn't exist on DB!")
-
 
 class UserAlreadyExists(Exception):
     def __init__(self, username: str):
