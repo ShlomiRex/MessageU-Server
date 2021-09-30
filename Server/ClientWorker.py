@@ -37,7 +37,6 @@ class ClientWorker(threading.Thread):
         self.on_close = on_close
 
     def run(self) -> None:
-        global database
         logger.info("Running worker...")
 
         try:
@@ -247,23 +246,34 @@ class ClientWorker(threading.Thread):
                 # Get chunk by chunk.
                 bytes_left_to_recv = content_size_int
                 logger.info(f"Reading user's file ({content_size_int} bytes)...")
+
+                # NOTE: Yuval says in the forum : https://opal.openu.ac.il/mod/ouilforum/discuss.php?d=2977367&p=7101326#p7101326
+                # That it's fine to load the file to RAM and just push to DB. I spent 2 days trying to append chunks to SQLite.
+                # I also think, if we weren't allowed to collect the entire file to RAM, that appending chunks is still wrong.
+                # SQLite is long term storage, not 'ram' like storage device. It affect performance for each query run.
+                file = b''
+
                 while bytes_left_to_recv > 0:
                     # Get cipher
                     if bytes_left_to_recv > S_RECV_CIPHER_BUFF:
                         cipher = self.client_socket.recv(S_RECV_CIPHER_BUFF)
                     else:
                         cipher = self.client_socket.recv(bytes_left_to_recv)
-                    # TODO: Append to blob
-                    success = database.append_msg_payload(message_id, cipher)
-                    if not success:
-                        raise "Could not append cipher chunk to the database row."
-                logger.info("Finished reading user's file!")
+                    # Append to file in memory
+                    file += cipher
+                logger.debug(f"Finished reading user's file! ({len(file)} bytes)")
 
-
-            payload_size = S_CLIENT_ID + S_MESSAGE_ID
-            payload = MessageResponse(dst_client_id, message_id)
-            response = BaseResponse(self.version, ResponseCodes.RESC_SEND_TEXT, payload_size, payload)
-            self.__send_response(response)
+                logger.info("Inserting file into DB...")
+                success = database.set_message_content(message_id, file)
+                if success:
+                    logger.debug("Insertion success!")
+                    payload_size = S_CLIENT_ID + S_MESSAGE_ID
+                    payload = MessageResponse(dst_client_id, message_id)
+                    response = BaseResponse(self.version, ResponseCodes.RESC_SEND_TEXT, payload_size, payload)
+                    self.__send_response(response)
+                else:
+                    logger.error("Insertion failed!")
+                    self.__send_error()
 
     def __receive_request_header(self) -> RequestHeader:
         logger.debug("Receiving request header...")

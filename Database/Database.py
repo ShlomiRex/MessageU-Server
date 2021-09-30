@@ -133,6 +133,14 @@ class Database():
             return res
 
     def insert_message(self, to_client: str, from_client: str, message_type: int, content: Optional[bytes]) -> (bool, Optional[int]):
+        """
+
+        :param to_client:
+        :param from_client:
+        :param message_type:
+        :param content:
+        :return: Returns tuple. Tuple contains 'success' and 'message_id'.
+        """
         logger.debug(f"Inserting message from: {from_client} to: {to_client}")
 
         UsersSanitizer.client_id(to_client)
@@ -181,11 +189,11 @@ class Database():
 
         return res
 
-    def delete_message(self, _id):
-        MessagesSanitizer.id(_id)
+    def delete_message(self, message_id: int):
+        MessagesSanitizer.id(message_id)
         cur = self._conn.cursor()
-        logger.debug(f"Deleting message: {_id}")
-        cur.execute("DELETE FROM Messages WHERE id=?;", [_id])
+        logger.debug(f"Deleting message: {message_id}")
+        cur.execute("DELETE FROM Messages WHERE id=?;", [message_id])
         self._conn.commit()
         cur.close()
 
@@ -201,10 +209,20 @@ class Database():
         self._conn.commit()
         cur.close()
 
+    def set_message_content(self, message_id: int, file: bytes) -> bool:
+        MessagesSanitizer.id(message_id)
+        cur = self._conn.cursor()
+
+        cur.execute("UPDATE Messages SET content = ? WHERE id = ?;", [file, message_id])
+
+        self._conn.commit()
+        cur.close()
+
 
 class UserNotExistDBException(Exception):
     def __init__(self, client_id: str):
         super().__init__(f"Client: {client_id} doesn't exist on DB!")
+
 
 class UserAlreadyExists(Exception):
     def __init__(self, username: str):
