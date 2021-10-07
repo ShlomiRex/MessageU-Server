@@ -1,6 +1,6 @@
 FILE_PORT = "port.info"
 S_RECV_BUFF = 1024  # Amount of bytes to read at once from socket.
-S_RECV_CIPHER_BUFF = ((S_RECV_BUFF / 16) + 1) * 16 # Amount of bytes to recv from AES CBS encryption algorithm, given the plain message is of S_RECV_BUFF size. Used for chunking.
+S_RECV_CIPHER_BUFF = int(((S_RECV_BUFF / 16) + 1) * 16) # Amount of bytes to recv from AES CBS encryption algorithm, given the plain message is of S_RECV_BUFF size. Used for chunking.
 
 S_CLIENT_ID = 16
 S_USERNAME = 255
