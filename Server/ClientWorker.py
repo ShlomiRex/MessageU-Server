@@ -222,8 +222,10 @@ class ClientWorker(threading.Thread):
             # Get cipher
             if bytes_left_to_recv > S_RECV_CIPHER_BUFF:
                 cipher = self.client_socket.recv(S_RECV_CIPHER_BUFF)
+                bytes_left_to_recv -= S_RECV_CIPHER_BUFF
             else:
                 cipher = self.client_socket.recv(bytes_left_to_recv)
+                bytes_left_to_recv -= bytes_left_to_recv
             # Stitch
             stitched_chunks += cipher
         logger.debug(f"Finished stitching chunks! (Stitch length: {len(stitched_chunks)} bytes)")
@@ -277,6 +279,9 @@ class ClientWorker(threading.Thread):
         elif message_type_enum == MessageTypes.SEND_SYMMETRIC_KEY:
             if content_size_int == 0:
                 raise ProtocolError(f"Expected to receive symmetric key from client, but content size is 0.")
+        elif message_type_enum == MessageTypes.SEND_TEXT_MESSAGE:
+            if content_size_int == 0:
+                raise ProtocolError(f"Expected to receive at least 1 character from text message.")
 
         logger.info(f"Request message from: '{from_client.hex()}' to: '{to_client.hex()}', content size: {content_size_int}")
 
@@ -290,7 +295,6 @@ class ClientWorker(threading.Thread):
             return
 
         # Check if we need to insert any payload.
-
         # Check if message has encrypted payload. In both cases, we deal with encrypted chunks.
         if message_type_enum in (MessageTypes.SEND_FILE, MessageTypes.SEND_TEXT_MESSAGE):
             self.__handle_encrypted_chunks(content_size_int, message_id)
