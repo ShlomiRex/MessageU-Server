@@ -7,6 +7,7 @@ from typing import Optional
 
 from Database import MODULE_LOGGER_NAME, DB_LOCATION
 from Database.Sanitizer import UsersSanitizer, MessagesSanitizer
+from Server.ProtocolDefenitions import S_USERNAME, S_CLIENT_ID, S_PUBLIC_KEY
 
 logger = logging.getLogger(MODULE_LOGGER_NAME)
 
@@ -30,12 +31,14 @@ class Database():
 
         logger.debug("Creating Users table...")
 
-        cur.execute("""
+        # TODO: Add 'varchar(255)' to username (name)
+        # TODO: Check varchar(?) works!
+        cur.execute(f"""
             CREATE TABLE IF NOT EXISTS Users (
                 id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
-                client_id text NOT NULL UNIQUE,
-                name text NOT NULL,
-                public_key text NOT NULL,
+                client_id varchar({S_CLIENT_ID}) NOT NULL UNIQUE,
+                name varchar({S_USERNAME}) NOT NULL,
+                public_key varchar({S_PUBLIC_KEY}) NOT NULL,
                 last_seen INTEGER
             );
         """)
@@ -44,11 +47,11 @@ class Database():
 
         logger.debug("Creating Messages table...")
         cur.execute(
-            """
+            f"""
             CREATE TABLE IF NOT EXISTS Messages (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
-                to_client TEXT NOT NULL,
-                from_client TEXT NOT NULL,
+                to_client varchar({S_CLIENT_ID}) NOT NULL,
+                from_client varchar({S_CLIENT_ID}) NOT NULL,
                 type INTEGER NOT NULL,
                 content_size INTEGER NOT NULL,
                 content blob
@@ -56,6 +59,7 @@ class Database():
             """
         )
         self._conn.commit()
+
         logger.debug("OK")
         cur.close()
 
@@ -92,7 +96,7 @@ class Database():
     def get_user(self, username: str):
         UsersSanitizer.username(username)
         cur = self._conn.cursor()
-        cur.execute("SELECT * FROM Users WHERE name == ?;", username)
+        cur.execute("SELECT * FROM Users WHERE name == ?;", [username])
         row = cur.fetchone()
         return row
 
