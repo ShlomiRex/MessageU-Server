@@ -1,6 +1,5 @@
 import sqlite3
 import logging
-import threading
 import time
 import uuid
 from typing import Optional
@@ -213,14 +212,20 @@ class Database():
         self._conn.commit()
         cur.close()
 
-    def set_message_content(self, message_id: int, file: bytes) -> bool:
-        MessagesSanitizer.id(message_id)
-        cur = self._conn.cursor()
+    def set_message_content(self, message_id: int, content: Optional[bytes]) -> bool:
+        if len(content) > 0:
+            MessagesSanitizer.id(message_id)
+            cur = self._conn.cursor()
 
-        cur.execute("UPDATE Messages SET content = ? WHERE id = ?;", [file, message_id])
+            cur.execute("UPDATE Messages SET content_size = ?, content = ? WHERE id = ?;", [len(content), content, message_id])
 
-        self._conn.commit()
-        cur.close()
+            self._conn.commit()
+            cur.close()
+
+            if cur.rowcount < 1:
+                return False
+
+        return True
 
 
 class UserNotExistDBException(Exception):

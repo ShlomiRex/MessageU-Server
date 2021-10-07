@@ -257,12 +257,6 @@ class ClientWorker(threading.Thread):
         to_client = dst_client_id
         from_client = header.clientId
         content_size_int = int.from_bytes(content_size, "little", signed=False)
-        # Sanitize protocol
-        if message_type_enum == MessageTypes.REQ_SYMMETRIC_KEY:
-            if content_size_int != 0:
-                raise ProtocolError(f"Expected content of size 0 in symmetric key request, instead got content size: {content_size_int}")
-
-        logger.info(f"Request message from: '{from_client.hex()}' to: '{to_client.hex()}'")
 
         # Log the correct message
         if message_type_enum == MessageTypes.SEND_FILE:
@@ -276,6 +270,16 @@ class ClientWorker(threading.Thread):
         else:
             raise ValueError(f"Invalid message type: {message_type_enum}")
 
+        # Sanitize protocol
+        if message_type_enum == MessageTypes.REQ_SYMMETRIC_KEY:
+            if content_size_int != 0:
+                raise ProtocolError(f"Expected content of size 0 in 'get symmetric key' request, instead got content size: {content_size_int}")
+        elif message_type_enum == MessageTypes.SEND_SYMMETRIC_KEY:
+            if content_size_int == 0:
+                raise ProtocolError(f"Expected to receive symmetric key from client, but content size is 0.")
+
+        logger.info(f"Request message from: '{from_client.hex()}' to: '{to_client.hex()}', content size: {content_size_int}")
+
         # In any case, insert message with empty payload (if we need to insert payload, we update the row later)
         logger.debug("Inserting message to DB...")
         success, message_id = database.insert_message(to_client.hex(), from_client.hex(), message_type_int, None)
@@ -285,10 +289,21 @@ class ClientWorker(threading.Thread):
             self.__send_error()
             return
 
+        # Check if we need to insert any payload.
 
         # Check if message has encrypted payload. In both cases, we deal with encrypted chunks.
         if message_type_enum in (MessageTypes.SEND_FILE, MessageTypes.SEND_TEXT_MESSAGE):
             self.__handle_encrypted_chunks(content_size_int, message_id)
+        # Check if we need to receive symmetric key.
+        elif message_type_enum == MessageTypes.SEND_SYMMETRIC_KEY:
+            symm_key_enc = self.client_socket.recv(content_size_int)
+
+            logger.info("Inserting symmetric key into DB...")
+            success = database.set_message_content(message_id, symm_key_enc)
+            if not success:
+                logger.error("Insertion failed!")
+                self.__send_error()
+                return
 
         # Done handling each case. Send OK response.
         payload_size = S_CLIENT_ID + S_MESSAGE_ID
