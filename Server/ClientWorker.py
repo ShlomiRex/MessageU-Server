@@ -301,7 +301,11 @@ class ClientWorker(threading.Thread):
         # Check if we need to insert any payload.
         # Check if message has encrypted payload. In both cases, we deal with encrypted chunks.
         if message_type_enum in (MessageTypes.SEND_FILE, MessageTypes.SEND_TEXT_MESSAGE):
-            self.__handle_encrypted_chunks(content_size_int, message_id)
+            success = self.__handle_encrypted_chunks(content_size_int, message_id)
+            if not success:
+                self.__send_error()
+                return
+
         # Check if we need to receive symmetric key.
         elif message_type_enum == MessageTypes.SEND_SYMMETRIC_KEY:
             symm_key_enc = self.client_socket.recv(content_size_int)
@@ -334,6 +338,10 @@ class ClientWorker(threading.Thread):
 
     def __send_response(self, response: BaseResponse):
         packet = response.pack()
-        logger.debug(f"Sending response (parsed): {response}")
+
+        # Don't spam the entire payload into logs.
+        if response.payloadSize < S_RECV_BUFF:
+            logger.debug(f"Sending response (parsed): {response}")
+
         self.client_socket.sendall(packet)
         logger.debug("Sent!")
