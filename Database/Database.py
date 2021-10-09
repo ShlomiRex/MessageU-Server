@@ -30,8 +30,6 @@ class Database():
 
         logger.debug("Creating Users table...")
 
-        # TODO: Add 'varchar(255)' to username (name)
-        # TODO: Check varchar(?) works!
         cur.execute(f"""
             CREATE TABLE IF NOT EXISTS Users (
                 id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,

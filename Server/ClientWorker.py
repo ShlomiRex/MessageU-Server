@@ -3,7 +3,7 @@ import socket
 import threading
 import time
 
-from Database.Database import Database, UserNotExistDBException
+from Database.Database import Database, UserNotExistDBException, UserAlreadyExists
 from Server import LOGGER_FORMAT_THREAD, LOGGER_DATE_FORMAT
 from Server.ProtocolDefenitions import S_USERNAME, S_CLIENT_ID, S_REQUEST_HEADER, S_PUBLIC_KEY, S_MESSAGE_TYPE, \
     S_CONTENT_SIZE, S_MESSAGE_ID, SERVER_VERSION, S_RECV_BUFF, S_RECV_CIPHER_BUFF
@@ -49,25 +49,29 @@ class ClientWorker(threading.Thread):
             if header.code == RequestCodes.REQC_REGISTER_USER:
                 self.__handle_register_request()
 
-            # Registered API
+            # Registered API - do not allow unregistered users to call these API calls.
             else:
-                # Update user last seen
-                database.update_last_seen(header.clientId.hex())
-
-                if header.code == RequestCodes.REQC_CLIENT_LIST:
-                    self.__handle_client_list_request(header)
-
-                elif header.code == RequestCodes.REQC_PUB_KEY:
-                    self.__handle_pub_key_request()
-
-                elif header.code == RequestCodes.REQC_SEND_MESSAGE:
-                    self.__handle_send_message_request(header)
-
-                elif header.code == RequestCodes.REQC_WAITING_MSGS:
-                    self.__handle_pull_waiting_messages(header)
-
+                # Check if registered user
+                if not database.is_client_exists(header.clientId.hex()):
+                    self.__send_error()
                 else:
-                    raise ValueError("Request code: " + str(header.code) + " is not recognized.")
+                    # Update user last seen
+                    database.update_last_seen(header.clientId.hex())
+
+                    if header.code == RequestCodes.REQC_CLIENT_LIST:
+                        self.__handle_client_list_request(header)
+
+                    elif header.code == RequestCodes.REQC_PUB_KEY:
+                        self.__handle_pub_key_request()
+
+                    elif header.code == RequestCodes.REQC_SEND_MESSAGE:
+                        self.__handle_send_message_request(header)
+
+                    elif header.code == RequestCodes.REQC_WAITING_MSGS:
+                        self.__handle_pull_waiting_messages(header)
+
+                    else:
+                        raise ValueError("Request code: " + str(header.code) + " is not recognized.")
 
             # Call callback
             self.on_close(self)
@@ -124,7 +128,8 @@ class ClientWorker(threading.Thread):
 
             response = BaseResponse(self.version, ResponseCodes.RESC_REGISTER_SUCCESS, S_CLIENT_ID, client_id)
             self.__send_response(response)
-        except UserNotExistDBException:
+        except UserAlreadyExists:
+            logger.error(f"User {username} already exists in database!")
             self.__send_error()
 
         logger.info("Finished handling register request.")
@@ -241,7 +246,6 @@ class ClientWorker(threading.Thread):
 
     # Send text message + send request for symm key + send your symm key
     def __handle_send_message_request(self, header: RequestHeader):
-        # TODO: I need to test this entire function. Everything is changed.
         logger.info("Handling send message request...")
 
         # Get message header
