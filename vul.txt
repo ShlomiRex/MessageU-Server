@@ -1,7 +1,0 @@
-I don't get username, it can do sql injections probably
-I don't check length of inserted User or Message to DB
-Unregistered user can request user list, public key and more
-The request itself to server is not encrypted
-The IV in the symmetric key is always zero (page 12 - symmetric key - at the pdf) which is insecure.
-
-Eve can send her symm key to Alice, and Alice can't know its from Eve, because Eve forged the client id of Bob.
