@@ -19,6 +19,7 @@ Database editor and viewer: DBeaver Community - Windows + macOS
 Client C++ Libraries:
 
 * Crypto++ 8.5.0
+* Boost 1.70.0
 
 # Screenshots - Client
 ## Main Menu
